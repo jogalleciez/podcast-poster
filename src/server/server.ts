@@ -11,6 +11,17 @@ import {
   type CheckRSSResponse,
 } from "../shared/api.ts";
 import { XMLParser } from "fast-xml-parser";
+import { Devvit } from "@devvit/public-api";
+
+Devvit.configure({
+  http: {
+    domains: [
+      "rss.art19.com",
+      "omny.fm",
+      "traffic.omny.fm"
+    ],
+  },
+});
 
 export async function serverOnRequest(
   req: IncomingMessage,
