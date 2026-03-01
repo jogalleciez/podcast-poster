@@ -57,6 +57,9 @@ async function onRequest(
     case ApiEndpoint.OnPostCreate:
       body = await onMenuNewPost();
       break;
+    case ApiEndpoint.EpisodeFormSubmit:
+      body = await onEpisodeFormSubmit(req);
+      break;
     case ApiEndpoint.CheckRSS:
       body = await onCheckRSS();
       break;
@@ -122,59 +125,83 @@ async function onInit(): Promise<InitResponse> {
 
 
 async function onMenuNewPost(): Promise<UiResponse> {
-  const rssFeedUrlSetting = await settings.get("rssFeedUrl");
-  const RSS_URL = typeof rssFeedUrlSetting === "string" ? rssFeedUrlSetting : "https://rss.art19.com/get-played";
-
-  try {
-    const response = await fetch(RSS_URL);
-    if (!response.ok) throw new Error("Fetch failed");
-    const xmlData = await response.text();
-
-    // Quick parse just to get the latest item for the manual post
-    const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
-    const result = parser.parse(xmlData);
-    const channel = result?.rss?.channel || result?.feed;
-    const podcastTitle = channel?.title || "Podcast";
-    const items = [].concat(channel?.item || channel?.entry || []);
-
-    if (items.length > 0) {
-      const latestItem: any = items[0];
-      const episodeTitle = latestItem.title;
-      const link = latestItem.link;
-      const audioUrl = latestItem.enclosure?.["@_url"] || link;
-      const imageUrl = latestItem?.["itunes:image"]?.["@_href"] || channel?.image?.url || channel?.["itunes:image"]?.["@_href"];
-
-      const currentSubreddit = await reddit.getCurrentSubreddit();
-      const post = await reddit.submitCustomPost({
-        title: `[${podcastTitle}] - ${episodeTitle}`,
-        subredditName: currentSubreddit.name,
-        entry: "default"
-      });
-
-      // Save the specific data for this new post ID
-      const postData = { audioUrl, imageUrl, episodeTitle, podcastTitle };
-      await redis.set(`postData:${post.id}`, JSON.stringify(postData));
-
-      return {
-        showToast: { text: `Post ${post.id} created.`, appearance: "success" },
-        navigateTo: post.url,
-      };
-    }
-  } catch (e) {
-    console.error("Error creating post manually", e);
-  }
-
-  // Fallback if RSS fails
-  const currentSubreddit = await reddit.getCurrentSubreddit();
-  const post = await reddit.submitCustomPost({
-    title: context.appName,
-    subredditName: currentSubreddit.name,
-    entry: "default"
-  });
+  // Instead of fetching RSS (which is blocked by Devvit's HTTP policy),
+  // show a form so the moderator can enter episode details manually.
   return {
-    showToast: { text: `Fallback custom post ${post.id} created.`, appearance: "success" },
-    navigateTo: post.url,
+    showForm: {
+      name: "episodeForm",
+      form: {
+        title: "New Podcast Episode Post",
+        description: "Enter the episode details to create a Reddit post.",
+        fields: [
+          {
+            type: "string",
+            name: "podcastTitle",
+            label: "Podcast Name",
+            placeholder: "e.g. Get Played",
+            required: true,
+          },
+          {
+            type: "string",
+            name: "episodeTitle",
+            label: "Episode Title",
+            placeholder: "e.g. Episode 353: Building Gaming PCs",
+            required: true,
+          },
+          {
+            type: "string",
+            name: "audioUrl",
+            label: "Audio URL (MP3 link)",
+            placeholder: "https://...",
+            required: true,
+          },
+          {
+            type: "string",
+            name: "imageUrl",
+            label: "Cover Art URL (optional)",
+            placeholder: "https://...",
+            required: false,
+          },
+        ],
+      },
+    },
   };
+}
+
+async function onEpisodeFormSubmit(req: IncomingMessage): Promise<UiResponse> {
+  try {
+    const body: any = await new Promise((resolve, reject) => {
+      let data = "";
+      req.on("data", (chunk: Buffer) => { data += chunk.toString(); });
+      req.on("end", () => {
+        try { resolve(JSON.parse(data)); } catch (e) { reject(e); }
+      });
+      req.on("error", reject);
+    });
+
+    const values = body?.data?.values ?? body?.values ?? {};
+    const podcastTitle = values.podcastTitle || "Podcast";
+    const episodeTitle = values.episodeTitle || "Episode";
+    const audioUrl = values.audioUrl || "";
+    const imageUrl = values.imageUrl || "";
+
+    const currentSubreddit = await reddit.getCurrentSubreddit();
+    const post = await reddit.submitCustomPost({
+      title: `[${podcastTitle}] - ${episodeTitle}`,
+      subredditName: currentSubreddit.name,
+      entry: "default",
+    });
+
+    await redis.set(`postData:${post.id}`, JSON.stringify({ audioUrl, imageUrl, episodeTitle, podcastTitle }));
+
+    return {
+      showToast: { text: `Post created: ${episodeTitle}`, appearance: "success" },
+      navigateTo: post.url,
+    };
+  } catch (e) {
+    console.error("Error in onEpisodeFormSubmit:", e);
+    return { showToast: { text: "Failed to create post.", appearance: "neutral" } };
+  }
 }
 
 async function onAppInstall(): Promise<TriggerResponse> {

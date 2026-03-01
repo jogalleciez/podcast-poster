@@ -41,6 +41,9 @@
     "dev": "node --experimental-strip-types ./tools/build.ts --watch",
     "build": "node --experimental-strip-types ./tools/build.ts --minify"
   },
+  "forms": {
+    "episodeForm": "/internal/forms/episode-submit"
+  },
   "dev": {
     "subreddit": "podcast_poster_dev"
   },
