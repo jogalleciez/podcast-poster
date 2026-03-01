@@ -24,7 +24,7 @@ const opts: BuildOptions = {
 
 const clientOpts: BuildOptions = {
   ...opts,
-  entryPoints: ["src/client/splash.ts", "src/client/game.ts"],
+  entryPoints: ["src/client/splash.ts"],
   format: "esm",
   outdir: "public",
   platform: "browser",

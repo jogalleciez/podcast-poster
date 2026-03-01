@@ -6,10 +6,8 @@
     "entrypoints": {
       "default": {
         "inline": true,
-        "entry": "splash.html"
-      },
-      "game": {
-        "entry": "game.html"
+        "entry": "splash.html",
+        "height": "tall"
       }
     }
   },
@@ -42,5 +40,17 @@
   "scripts": {
     "dev": "node --experimental-strip-types ./tools/build.ts --watch",
     "build": "node --experimental-strip-types ./tools/build.ts --minify"
+  },
+  "dev": {
+    "subreddit": "podcast_poster_dev"
+  },
+  "settings": {
+    "subreddit": {
+      "rssFeedUrl": {
+        "type": "string",
+        "label": "RSS Feed URL",
+        "defaultValue": "https://rss.art19.com/get-played"
+      }
+    }
   }
 }

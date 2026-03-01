@@ -7,14 +7,9 @@ import type {
 } from "@devvit/web/shared";
 import {
   ApiEndpoint,
-  type DecrementRequest,
-  type DecrementResponse,
-  type IncrementRequest,
-  type IncrementResponse,
   type InitResponse,
   type CheckRSSResponse,
 } from "../shared/api.ts";
-import { once } from "node:events";
 import { XMLParser } from "fast-xml-parser";
 
 export async function serverOnRequest(
@@ -48,12 +43,6 @@ async function onRequest(
     case ApiEndpoint.Init:
       body = await onInit();
       break;
-    case ApiEndpoint.Increment:
-      body = await onIncrement(req);
-      break;
-    case ApiEndpoint.Decrement:
-      body = await onDecrement(req);
-      break;
     case ApiEndpoint.OnPostCreate:
       body = await onMenuNewPost();
       break;
@@ -72,7 +61,7 @@ async function onRequest(
   writeJSON<PartialJsonValue>("status" in body ? body.status : 200, body, rsp);
 }
 
-type ApiResponse = InitResponse | IncrementResponse | DecrementResponse | CheckRSSResponse;
+type ApiResponse = InitResponse | CheckRSSResponse;
 
 type ErrorResponse = {
   error: string;
@@ -86,56 +75,88 @@ function getPostId(): string {
   return context.postId;
 }
 
-function getPostCountKey(postId: string): string {
-  return `count:${postId}`;
-}
+
 
 async function onInit(): Promise<InitResponse> {
   const postId = getPostId();
-  const count = Number((await redis.get(getPostCountKey(postId))) ?? 0);
+
+  // Attempt to fetch the rich data saved for this specific post
+  let postData = {
+    audioUrl: "",
+    imageUrl: "",
+    episodeTitle: "Unknown Episode",
+    podcastTitle: "Podcast"
+  };
+
+  try {
+    const redisData = await redis.get(`postData:${postId}`);
+    if (redisData) {
+      postData = JSON.parse(redisData);
+    }
+  } catch (e) {
+    console.error("Failed to parse post metadata from redis", e);
+  }
+
   return {
     type: "init",
     postId,
-    count,
     username: context.username ?? "user",
+    audioUrl: postData.audioUrl,
+    imageUrl: postData.imageUrl,
+    episodeTitle: postData.episodeTitle,
+    podcastTitle: postData.podcastTitle
   };
 }
 
-async function onIncrement(req: IncomingMessage): Promise<IncrementResponse> {
-  const postId = getPostId();
-  const { amount } = await readJSON<IncrementRequest>(req).catch(() => ({
-    amount: 1,
-  }));
-  const incrementBy = Number.isFinite(amount) ? amount : 1;
-  const count = await redis.incrBy(getPostCountKey(postId), incrementBy);
-  return {
-    type: "increment",
-    postId,
-    count,
-  };
-}
 
-async function onDecrement(req: IncomingMessage): Promise<DecrementResponse> {
-  const postId = getPostId();
-  const { amount } = await readJSON<DecrementRequest>(req).catch(() => ({
-    amount: 1,
-  }));
-  const parsedAmount = typeof amount === "number" ? amount : Number(amount);
-  const decrementBy = Number.isFinite(parsedAmount) ? parsedAmount : 1;
-  const count = Number(
-    await redis.incrBy(getPostCountKey(postId), -decrementBy),
-  );
-  return {
-    type: "decrement",
-    postId,
-    count,
-  };
-}
 
 async function onMenuNewPost(): Promise<UiResponse> {
+  const rssFeedUrlSetting = await settings.get("rssFeedUrl");
+  const RSS_URL = typeof rssFeedUrlSetting === "string" ? rssFeedUrlSetting : "https://rss.art19.com/get-played";
+
+  try {
+    const response = await fetch(RSS_URL);
+    if (!response.ok) throw new Error("Fetch failed");
+    const xmlData = await response.text();
+
+    // Quick parse just to get the latest item for the manual post
+    const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
+    const result = parser.parse(xmlData);
+    const channel = result?.rss?.channel || result?.feed;
+    const podcastTitle = channel?.title || "Podcast";
+    const items = [].concat(channel?.item || channel?.entry || []);
+
+    if (items.length > 0) {
+      const latestItem: any = items[0];
+      const episodeTitle = latestItem.title;
+      const link = latestItem.link;
+      const audioUrl = latestItem.enclosure?.["@_url"] || link;
+      const imageUrl = latestItem?.["itunes:image"]?.["@_href"] || channel?.image?.url || channel?.["itunes:image"]?.["@_href"];
+
+      const currentSubreddit = await reddit.getCurrentSubreddit();
+      const post = await reddit.submitPost({
+        title: `[${podcastTitle}] - ${episodeTitle}`,
+        subredditName: currentSubreddit.name,
+        url: link
+      });
+
+      // Save the specific data for this new post ID
+      const postData = { audioUrl, imageUrl, episodeTitle, podcastTitle };
+      await redis.set(`postData:${post.id}`, JSON.stringify(postData));
+
+      return {
+        showToast: { text: `Post ${post.id} created.`, appearance: "success" },
+        navigateTo: post.url,
+      };
+    }
+  } catch (e) {
+    console.error("Error creating post manually", e);
+  }
+
+  // Fallback if RSS fails
   const post = await reddit.submitCustomPost({ title: context.appName });
   return {
-    showToast: { text: `Post ${post.id} created.`, appearance: "success" },
+    showToast: { text: `Fallback custom post ${post.id} created.`, appearance: "success" },
     navigateTo: post.url,
   };
 }
@@ -148,8 +169,11 @@ async function onAppInstall(): Promise<TriggerResponse> {
   return {};
 }
 
+import { settings } from "@devvit/web/server";
+
 async function onCheckRSS(): Promise<CheckRSSResponse> {
-  const RSS_URL = "https://rss.art19.com/get-played";
+  const rssFeedUrlSetting = await settings.get("rssFeedUrl");
+  const RSS_URL = typeof rssFeedUrlSetting === "string" ? rssFeedUrlSetting : "https://rss.art19.com/get-played";
   const REDIS_KEY = "last_posted_rss_guid";
 
   try {
@@ -159,10 +183,16 @@ async function onCheckRSS(): Promise<CheckRSSResponse> {
     }
     const xmlData = await response.text();
 
-    const parser = new XMLParser();
+    const parser = new XMLParser({
+      ignoreAttributes: false,
+      attributeNamePrefix: "@_"
+    });
     const result = parser.parse(xmlData);
 
-    let items = result?.rss?.channel?.item || result?.feed?.entry || [];
+    const channel = result?.rss?.channel || result?.feed;
+    const podcastTitle = channel?.title || "Podcast";
+
+    let items = channel?.item || channel?.entry || [];
     if (!Array.isArray(items)) {
       items = [items];
     }
@@ -173,11 +203,19 @@ async function onCheckRSS(): Promise<CheckRSSResponse> {
     }
 
     const latestItem = items[0];
-    const guid = latestItem.guid || latestItem.id || latestItem.link;
-    const title = latestItem.title;
+    const guid = latestItem.guid?.["#text"] || latestItem.guid || latestItem.id || latestItem.link;
+    const episodeTitle = latestItem.title;
     const link = latestItem.link;
 
-    if (!guid || !title || !link) {
+    // Extract audio URL from enclosure or link
+    const audioUrl = latestItem.enclosure?.["@_url"] || link;
+
+    // Extract image (try item specific first, then channel fallback)
+    const imageUrl = latestItem?.["itunes:image"]?.["@_href"] ||
+      channel?.image?.url ||
+      channel?.["itunes:image"]?.["@_href"];
+
+    if (!guid || !episodeTitle || !audioUrl) {
       console.error("Missing required metadata in RSS item:", latestItem);
       return {};
     }
@@ -185,7 +223,7 @@ async function onCheckRSS(): Promise<CheckRSSResponse> {
     const lastPostedGuid = await redis.get(REDIS_KEY);
     if (lastPostedGuid !== guid) {
       const currentSubreddit = await reddit.getCurrentSubreddit();
-      const postTitle = `[Podcast] - ${title}`;
+      const postTitle = `[${podcastTitle}] - ${episodeTitle}`;
 
       const newPost = await reddit.submitPost({
         title: postTitle,
@@ -194,9 +232,20 @@ async function onCheckRSS(): Promise<CheckRSSResponse> {
       });
       console.log(`Posted new episode: ${newPost.url}`);
 
+      // Save the latest GUID so we don't double post
       await redis.set(REDIS_KEY, guid);
+
+      // Save the specific data for this new post ID so the frontend can retrieve it
+      const postData = {
+        audioUrl,
+        imageUrl,
+        episodeTitle,
+        podcastTitle
+      };
+      await redis.set(`postData:${newPost.id}`, JSON.stringify(postData));
+
     } else {
-      console.log("Latest episode already posted:", title);
+      console.log("Latest episode already posted:", episodeTitle);
     }
   } catch (error) {
     console.error("Error in onCheckRSS:", error);
@@ -219,9 +268,4 @@ function writeJSON<T extends PartialJsonValue>(
   rsp.end(body);
 }
 
-async function readJSON<T>(req: IncomingMessage): Promise<T> {
-  const chunks: Uint8Array[] = [];
-  req.on("data", (chunk) => chunks.push(chunk));
-  await once(req, "end");
-  return JSON.parse(`${Buffer.concat(chunks)}`);
-}
+

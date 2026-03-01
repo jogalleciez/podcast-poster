@@ -1,29 +1,14 @@
 export type InitResponse = {
   type: "init";
   postId: string;
-  count: number;
   username: string;
+  audioUrl?: string;
+  imageUrl?: string;
+  episodeTitle?: string;
+  podcastTitle?: string;
 };
 
-export type IncrementResponse = {
-  type: "increment";
-  postId: string;
-  count: number;
-};
 
-export type IncrementRequest = {
-  amount: number;
-};
-
-export type DecrementResponse = {
-  type: "decrement";
-  postId: string;
-  count: number;
-};
-
-export type DecrementRequest = {
-  amount: number;
-};
 
 export type CheckRSSRequest = {};
 
@@ -31,8 +16,6 @@ export type CheckRSSResponse = {};
 
 export const ApiEndpoint = {
   Init: "/api/init",
-  Increment: "/api/increment",
-  Decrement: "/api/decrement",
   OnPostCreate: "/internal/menu/post-create",
   OnAppInstall: "/internal/on-app-install",
   CheckRSS: "/internal/cron/check-rss",
