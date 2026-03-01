@@ -134,10 +134,10 @@ async function onMenuNewPost(): Promise<UiResponse> {
       const imageUrl = latestItem?.["itunes:image"]?.["@_href"] || channel?.image?.url || channel?.["itunes:image"]?.["@_href"];
 
       const currentSubreddit = await reddit.getCurrentSubreddit();
-      const post = await reddit.submitPost({
+      const post = await reddit.submitCustomPost({
         title: `[${podcastTitle}] - ${episodeTitle}`,
         subredditName: currentSubreddit.name,
-        url: link
+        entry: "default"
       });
 
       // Save the specific data for this new post ID
@@ -154,7 +154,12 @@ async function onMenuNewPost(): Promise<UiResponse> {
   }
 
   // Fallback if RSS fails
-  const post = await reddit.submitCustomPost({ title: context.appName });
+  const currentSubreddit = await reddit.getCurrentSubreddit();
+  const post = await reddit.submitCustomPost({
+    title: context.appName,
+    subredditName: currentSubreddit.name,
+    entry: "default"
+  });
   return {
     showToast: { text: `Fallback custom post ${post.id} created.`, appearance: "success" },
     navigateTo: post.url,
@@ -225,10 +230,10 @@ async function onCheckRSS(): Promise<CheckRSSResponse> {
       const currentSubreddit = await reddit.getCurrentSubreddit();
       const postTitle = `[${podcastTitle}] - ${episodeTitle}`;
 
-      const newPost = await reddit.submitPost({
+      const newPost = await reddit.submitCustomPost({
         title: postTitle,
         subredditName: currentSubreddit.name,
-        url: link,
+        entry: "default"
       });
       console.log(`Posted new episode: ${newPost.url}`);
 
