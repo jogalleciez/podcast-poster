@@ -1,16 +1,6 @@
 {
   "$schema": "https://developers.reddit.com/schema/config-file.v1.json",
   "name": "podcast-poster",
-  "post": {
-    "dir": "public",
-    "entrypoints": {
-      "default": {
-        "inline": true,
-        "entry": "splash.html",
-        "height": "tall"
-      }
-    }
-  },
   "server": {
     "dir": "dist/server",
     "entry": "index.js"
@@ -18,8 +8,8 @@
   "menu": {
     "items": [
       {
-        "label": "Create a new post",
-        "description": "podcast-poster",
+        "label": "Post most recent episode",
+        "description": "Fetches the latest episode from the RSS feed and creates a new post.",
         "location": "subreddit",
         "forUserType": "moderator",
         "endpoint": "/internal/menu/post-create"
@@ -41,8 +31,15 @@
     "dev": "node --experimental-strip-types ./tools/build.ts --watch",
     "build": "node --experimental-strip-types ./tools/build.ts --minify"
   },
-  "forms": {
-    "episodeForm": "/internal/forms/episode-submit"
+  "permissions": {
+    "http": {
+      "enable": true,
+      "domains": [
+        "rss.art19.com",
+        "omny.fm",
+        "traffic.omny.fm"
+      ]
+    }
   },
   "dev": {
     "subreddit": "podcast_poster_dev"
