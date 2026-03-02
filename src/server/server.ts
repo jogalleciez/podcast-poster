@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { context, reddit, redis, settings } from "@devvit/web/server";
+import { reddit, redis, settings } from "@devvit/web/server";
 import type {
   PartialJsonValue,
   TriggerResponse,
@@ -67,30 +67,51 @@ type ErrorResponse = {
 };
 
 // ---------------------------------------------------------------------------
-// RSS helpers
+// Feed configuration
 // ---------------------------------------------------------------------------
+
+type FeedConfig = {
+  index: number;       // 1–5
+  url: string;
+  nameOverride: string; // may be empty — fall back to RSS <title>
+};
 
 type EpisodeData = {
   guid: string;
-  podcastTitle: string;
+  podcastTitle: string;  // resolved: nameOverride ?? RSS title
   episodeTitle: string;
   description: string;
   audioUrl: string;
   imageUrl: string;
 };
 
-async function getRssFeedUrl(): Promise<string> {
-  const setting = await settings.get("rssFeedUrl");
-  return typeof setting === "string" && setting.trim()
-    ? setting.trim()
-    : "https://rss.art19.com/get-played";
+/** Read and return all feed slots that have a URL configured. */
+async function getFeeds(): Promise<FeedConfig[]> {
+  const feeds: FeedConfig[] = [];
+
+  for (let i = 1; i <= 5; i++) {
+    const urlSetting = await settings.get(`feed${i}Url`);
+    const nameSetting = await settings.get(`feed${i}Name`);
+
+    const url = typeof urlSetting === "string" ? urlSetting.trim() : "";
+    const nameOverride = typeof nameSetting === "string" ? nameSetting.trim() : "";
+
+    if (url) {
+      feeds.push({ index: i, url, nameOverride });
+    }
+  }
+
+  return feeds;
 }
 
-async function fetchLatestEpisode(): Promise<EpisodeData | null> {
-  const RSS_URL = await getRssFeedUrl();
-  const response = await fetch(RSS_URL);
+// ---------------------------------------------------------------------------
+// RSS helpers
+// ---------------------------------------------------------------------------
+
+async function fetchLatestEpisode(feed: FeedConfig): Promise<EpisodeData | null> {
+  const response = await fetch(feed.url);
   if (!response.ok) {
-    throw new Error(`RSS fetch failed: ${response.status}`);
+    throw new Error(`RSS fetch failed for feed ${feed.index}: ${response.status}`);
   }
   const xmlData = await response.text();
 
@@ -100,7 +121,9 @@ async function fetchLatestEpisode(): Promise<EpisodeData | null> {
   const channel = result?.rss?.channel ?? result?.feed;
   if (!channel) return null;
 
-  const podcastTitle: string = channel.title ?? "Podcast";
+  // Use the moderator-provided name override; fall back to RSS <title>
+  const podcastTitle: string =
+    feed.nameOverride || channel.title || "Podcast";
 
   let items: any[] = channel.item ?? channel.entry ?? [];
   if (!Array.isArray(items)) items = [items];
@@ -113,7 +136,6 @@ async function fetchLatestEpisode(): Promise<EpisodeData | null> {
 
   const episodeTitle: string = item.title ?? "Untitled Episode";
 
-  // Episode description — prefer `<description>` then `<itunes:summary>`
   const rawDescription: string =
     item.description ??
     item["itunes:summary"] ??
@@ -155,49 +177,85 @@ async function createEpisodePost(episode: EpisodeData): Promise<string> {
 // Handlers
 // ---------------------------------------------------------------------------
 
-/** Subreddit menu → "Post most recent episode" */
+/**
+ * Subreddit menu → "Post most recent episode"
+ * Posts the latest episode from every configured feed right now,
+ * then updates the per-feed GUID so the cron won't double-post.
+ */
 async function onMenuPostLatest(): Promise<UiResponse> {
-  try {
-    const episode = await fetchLatestEpisode();
-    if (!episode) {
-      return { showToast: { text: "No episodes found in the RSS feed.", appearance: "neutral" } };
-    }
+  const feeds = await getFeeds();
 
-    const url = await createEpisodePost(episode);
-
-    // Remember this as last-posted so the cron doesn't double-post it
-    await redis.set("last_posted_rss_guid", episode.guid);
-
+  if (feeds.length === 0) {
     return {
-      showToast: { text: `Posted: ${episode.episodeTitle}`, appearance: "success" },
-      navigateTo: url,
+      showToast: {
+        text: "No feeds configured. Add an RSS URL in App Settings.",
+        appearance: "neutral",
+      },
     };
-  } catch (e) {
-    console.error("Error in onMenuPostLatest:", e);
-    return { showToast: { text: `Failed to post: ${e}`, appearance: "neutral" } };
   }
+
+  const posted: string[] = [];
+  const failed: string[] = [];
+
+  for (const feed of feeds) {
+    try {
+      const episode = await fetchLatestEpisode(feed);
+      if (!episode) {
+        failed.push(`Feed ${feed.index}: no episodes found`);
+        continue;
+      }
+
+      await createEpisodePost(episode);
+      await redis.set(`last_posted_guid:${feed.index}`, episode.guid);
+      posted.push(episode.episodeTitle);
+    } catch (e) {
+      console.error(`Error posting feed ${feed.index}:`, e);
+      failed.push(`Feed ${feed.index}: ${e}`);
+    }
+  }
+
+  if (posted.length > 0) {
+    const summary = posted.length === 1
+      ? `Posted: ${posted[0]}`
+      : `Posted ${posted.length} episodes`;
+    return { showToast: { text: summary, appearance: "success" } };
+  }
+
+  return {
+    showToast: {
+      text: failed.length > 0 ? `Errors: ${failed.join("; ")}` : "Nothing to post.",
+      appearance: "neutral",
+    },
+  };
 }
 
-/** Scheduler cron → only posts when a new episode is detected */
+/**
+ * Scheduler cron (every 15 min) → only posts when a new episode is detected.
+ * Each feed is tracked independently via its own Redis key.
+ */
 async function onCheckRSS(): Promise<CheckRSSResponse> {
-  const REDIS_KEY = "last_posted_rss_guid";
-  try {
-    const episode = await fetchLatestEpisode();
-    if (!episode) {
-      console.log("No episodes found in RSS feed.");
-      return {};
-    }
+  const feeds = await getFeeds();
 
-    const lastPostedGuid = await redis.get(REDIS_KEY);
-    if (episode.guid === lastPostedGuid) {
-      console.log("Latest episode already posted:", episode.episodeTitle);
-      return {};
-    }
+  for (const feed of feeds) {
+    const REDIS_KEY = `last_posted_guid:${feed.index}`;
+    try {
+      const episode = await fetchLatestEpisode(feed);
+      if (!episode) {
+        console.log(`Feed ${feed.index}: no episodes found.`);
+        continue;
+      }
 
-    await createEpisodePost(episode);
-    await redis.set(REDIS_KEY, episode.guid);
-  } catch (error) {
-    console.error("Error in onCheckRSS:", error);
+      const lastPostedGuid = await redis.get(REDIS_KEY);
+      if (episode.guid === lastPostedGuid) {
+        console.log(`Feed ${feed.index}: already posted "${episode.episodeTitle}"`);
+        continue;
+      }
+
+      await createEpisodePost(episode);
+      await redis.set(REDIS_KEY, episode.guid);
+    } catch (error) {
+      console.error(`Error checking feed ${feed.index}:`, error);
+    }
   }
 
   return {};
@@ -205,7 +263,7 @@ async function onCheckRSS(): Promise<CheckRSSResponse> {
 
 /** App install trigger */
 async function onAppInstall(): Promise<TriggerResponse> {
-  console.log("podcast-poster installed, scheduler will auto-post new episodes.");
+  console.log("podcast-poster installed. Configure RSS feeds in App Settings.");
   return {};
 }
 
