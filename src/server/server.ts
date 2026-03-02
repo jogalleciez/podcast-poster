@@ -85,21 +85,30 @@ type EpisodeData = {
   imageUrl: string;
 };
 
-/** Read and return all feed slots that have a URL configured. */
+/** Read and parse the paragraph setting text for all feeds. */
 async function getFeeds(): Promise<FeedConfig[]> {
   const feeds: FeedConfig[] = [];
+  const rssListSetting = await settings.get("rssFeedsList");
 
-  for (let i = 1; i <= 5; i++) {
-    const urlSetting = await settings.get(`feed${i}Url`);
-    const nameSetting = await settings.get(`feed${i}Name`);
+  if (typeof rssListSetting !== "string" || !rssListSetting.trim()) {
+    return feeds;
+  }
 
-    const url = typeof urlSetting === "string" ? urlSetting.trim() : "";
-    const nameOverride = typeof nameSetting === "string" ? nameSetting.trim() : "";
+  // Split on newlines, clean up whitespace, remove empty lines
+  const lines = rssListSetting.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+
+  lines.forEach((line, index) => {
+    // Support separation via pipe (|) or comma (,)
+    const parts = line.split(/[|,]/);
+    // Grab the first part as URL, fix any missing domains/schemes if needed (though assumed full URL)
+    const url = parts[0]?.trim() || "";
+    const nameOverride = parts.length > 1 ? parts.slice(1).join("").trim() : "";
 
     if (url) {
-      feeds.push({ index: i, url, nameOverride });
+      // Use index + 1 so Redis keys match the old format (slot 1, 2, 3...)
+      feeds.push({ index: index + 1, url, nameOverride });
     }
-  }
+  });
 
   return feeds;
 }

@@ -30,14 +30,23 @@ This posts from all active feed slots and updates their GUIDs so the cron won't 
 
 ## Configuration
 
-After installing the app on your subreddit, go to **App Settings** to configure up to **5 podcast feeds**. Each feed has two fields:
+After installing the app on your subreddit, go to **App Settings** to configure your podcast feeds. 
 
-| Setting | Description |
-|---|---|
-| **Podcast N — RSS Feed URL** | The full RSS feed URL (required to activate a slot) |
-| **Podcast N — Name** | Optional. Overrides the podcast name from the RSS feed in post titles. Leave blank to use the name from the feed. |
+Find the **RSS Feeds List** setting. You can add as many feeds as you want by entering them on **new lines**. You can optionally provide a custom name for the podcast by separating it with a pipe (`|`) or a comma (`,`).
 
-Only slots with a URL filled in are active. Slot 1 defaults to `https://rss.art19.com/get-played`.
+**Format:**
+```
+https://path/to/feed.xml | Optional Podcast Name
+```
+
+**Example:**
+```text
+https://rss.art19.com/get-played | Get Played
+https://feeds.megaphone.fm/WWO8086402096 | Conan O'Brien
+https://feeds.npr.org/510318/podcast.xml
+```
+
+*(If you omit the name override, it will use the podcast title directly from the RSS feed).*
 
 ---
 

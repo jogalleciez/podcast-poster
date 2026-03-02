@@ -46,52 +46,11 @@
   },
   "settings": {
     "subreddit": {
-      "feed1Url": {
-        "type": "string",
-        "label": "Podcast 1 — RSS Feed URL",
-        "helpText": "Paste the full RSS feed URL for your first podcast.",
+      "rssFeedsList": {
+        "type": "paragraph",
+        "label": "RSS Feeds List",
+        "helpText": "Enter one feed per line. Format: https://rss.url.com | Optional Podcast Name",
         "defaultValue": "https://rss.art19.com/get-played"
-      },
-      "feed1Name": {
-        "type": "string",
-        "label": "Podcast 1 — Name (optional)",
-        "helpText": "Override the podcast name shown in post titles. Leave blank to use the RSS feed title."
-      },
-      "feed2Url": {
-        "type": "string",
-        "label": "Podcast 2 — RSS Feed URL",
-        "helpText": "Optional. Add a second podcast RSS feed."
-      },
-      "feed2Name": {
-        "type": "string",
-        "label": "Podcast 2 — Name (optional)"
-      },
-      "feed3Url": {
-        "type": "string",
-        "label": "Podcast 3 — RSS Feed URL",
-        "helpText": "Optional. Add a third podcast RSS feed."
-      },
-      "feed3Name": {
-        "type": "string",
-        "label": "Podcast 3 — Name (optional)"
-      },
-      "feed4Url": {
-        "type": "string",
-        "label": "Podcast 4 — RSS Feed URL",
-        "helpText": "Optional. Add a fourth podcast RSS feed."
-      },
-      "feed4Name": {
-        "type": "string",
-        "label": "Podcast 4 — Name (optional)"
-      },
-      "feed5Url": {
-        "type": "string",
-        "label": "Podcast 5 — RSS Feed URL",
-        "helpText": "Optional. Add a fifth podcast RSS feed."
-      },
-      "feed5Name": {
-        "type": "string",
-        "label": "Podcast 5 — Name (optional)"
       }
     }
   }
