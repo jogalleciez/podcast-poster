@@ -49,8 +49,8 @@
       "rssFeedsList": {
         "type": "paragraph",
         "label": "RSS Feeds List",
-        "helpText": "Enter one feed per line. Format: https://rss.url.com | Optional Podcast Name",
-        "defaultValue": "https://rss.art19.com/get-played"
+        "helpText": "Enter one feed per line. Format: https://rss.url.com | Optional Podcast Name | Optional Reason for URL Access",
+        "defaultValue": "https://rss.art19.com/get-played | Get Played | Fetching RSS feed to check for new episodes"
       }
     }
   }

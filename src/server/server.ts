@@ -74,6 +74,7 @@ type FeedConfig = {
   index: number;       // 1–5
   url: string;
   nameOverride: string; // may be empty — fall back to RSS <title>
+  description: string;
 };
 
 type EpisodeData = {
@@ -102,11 +103,12 @@ async function getFeeds(): Promise<FeedConfig[]> {
     const parts = line.split(/[|,]/);
     // Grab the first part as URL, fix any missing domains/schemes if needed (though assumed full URL)
     const url = parts[0]?.trim() || "";
-    const nameOverride = parts.length > 1 ? parts.slice(1).join("").trim() : "";
+    const nameOverride = parts.length > 1 && parts[1] ? parts[1].trim() : "";
+    const description = parts.length > 2 && parts[2] ? parts.slice(2).join("").trim() : "";
 
     if (url) {
       // Use index + 1 so Redis keys match the old format (slot 1, 2, 3...)
-      feeds.push({ index: index + 1, url, nameOverride });
+      feeds.push({ index: index + 1, url, nameOverride, description });
     }
   });
 
@@ -118,7 +120,11 @@ async function getFeeds(): Promise<FeedConfig[]> {
 // ---------------------------------------------------------------------------
 
 async function fetchLatestEpisode(feed: FeedConfig): Promise<EpisodeData | null> {
-  const response = await fetch(feed.url);
+  const response = await fetch(feed.url, {
+    headers: {
+      "X-Fetch-Reason": feed.description || "Fetching RSS feed to check for new episodes",
+    },
+  });
   if (!response.ok) {
     throw new Error(`RSS fetch failed for feed ${feed.index}: ${response.status}`);
   }

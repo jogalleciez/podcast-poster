@@ -112,7 +112,7 @@ This app fetches external RSS feeds server-side. The following domains have been
 | `omny.fm` | Alternative podcast hosting provider |
 | `traffic.omny.fm` | Omny audio delivery CDN |
 
-> **Note:** Domain allowlisting requires approval from Reddit's developer team. Until approved, RSS fetching will return a `PERMISSION_DENIED` error. Check approval status at `developers.reddit.com/apps/podcast-poster/developer-settings`.
+> **Note:** Domain allowlisting requires approval from Reddit's developer team. Until approved, RSS fetching will return a `PERMISSION_DENIED` error. Check approval status at `deveopers.reddit.com/apps/podcast-poster/developler-settings`.
 
 ---
 
