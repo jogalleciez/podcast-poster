@@ -96,8 +96,8 @@
       "feedUrl": {
         "type": "string",
         "label": "RSS Feed URL",
-        "helpText": "Enter the URL of the podcast RSS feed.",
-        "placeholder": "https://rss.art19.com/get-played"
+        "helpText": "Enter the URL of the podcast RSS feed. e.g. https://rss.art19.com/get-played",
+        "defaultValue": ""
       },
       "feedName": {
         "type": "string",
@@ -129,6 +129,20 @@
           }
         ],
         "defaultValue": "hourly"
+      },
+      "weeklyPollingDay": {
+        "type": "select",
+        "label": "Weekly Polling Day",
+        "options": [
+          { "label": "Sunday", "value": "0" },
+          { "label": "Monday", "value": "1" },
+          { "label": "Tuesday", "value": "2" },
+          { "label": "Wednesday", "value": "3" },
+          { "label": "Thursday", "value": "4" },
+          { "label": "Friday", "value": "5" },
+          { "label": "Saturday", "value": "6" }
+        ],
+        "defaultValue": "0"
       }
     }
   }
