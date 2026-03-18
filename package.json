@@ -18,7 +18,8 @@
   "dependencies": {
     "@devvit/web": "0.12.13",
     "devvit": "0.12.13",
-    "fast-xml-parser": "^5.4.1"
+    "fast-xml-parser": "^5.4.1",
+    "node-html-markdown": "^2.0.0"
   },
   "devDependencies": {
     "@types/node": "22.12.0",

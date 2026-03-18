@@ -9,7 +9,7 @@
     "items": [
       {
         "label": "Post most recent episode",
-        "description": "Fetches the latest episode from all configured RSS feeds and creates new posts.",
+        "description": "Fetches the latest episode from configured RSS feed and creates new posts.",
         "location": "subreddit",
         "forUserType": "moderator",
         "endpoint": "/internal/menu/post-create"
@@ -37,7 +37,48 @@
       "domains": [
         "rss.art19.com",
         "omny.fm",
-        "traffic.omny.fm"
+        "traffic.omny.fm",
+        "anchor.fm",
+        "castos.com",
+        "feeds.buzzsprout.com",
+        "feeds.redcircle.com",
+        "feeds.transistor.fm",
+        "feeds.captivate.fm",
+        "libsyn.com",
+        "feed.podbean.com",
+        "media.rss.com",
+        "feeds.acast.com",
+        "feed.ausha.co",
+        "squarespace.com",
+        "rss.hubhopper.com",
+        "audioboom.com",
+        "awesound.com",
+        "backtracks.fm",
+        "blogtalkradio.com",
+        "blubrry.com",
+        "buzzsprout.com",
+        "fireside.fm",
+        "megaphone.fm",
+        "omnystudio.com",
+        "pinecast.com",
+        "pippa.io",
+        "podbean.com",
+        "podcastblastoff.com",
+        "podcasts.com",
+        "podcastwebsites.com",
+        "podiant.co",
+        "podigee.com",
+        "podomatic.com",
+        "podpoint.com",
+        "shoutengine.com",
+        "simplecast.com",
+        "soundcloud.com",
+        "spreaker.com",
+        "talkshoe.com",
+        "transistor.fm",
+        "trycast.com",
+        "whooshkaa.com",
+        "zencast.fm"
       ]
     }
   },
@@ -46,11 +87,48 @@
   },
   "settings": {
     "subreddit": {
-      "rssFeedsList": {
-        "type": "paragraph",
-        "label": "RSS Feeds List",
-        "helpText": "Enter one feed per line. Format: https://rss.url.com | Optional Podcast Name | Optional Reason for URL Access",
-        "defaultValue": "https://rss.art19.com/get-played | Get Played | Fetching RSS feed to check for new episodes"
+      "appEnabled": {
+        "type": "boolean",
+        "label": "App Enabled",
+        "helpText": "Turn this on to enable automatic checking and posting of new podcast episodes.",
+        "defaultValue": true
+      },
+      "feedUrl": {
+        "type": "string",
+        "label": "RSS Feed URL",
+        "helpText": "Enter the URL of the podcast RSS feed.",
+        "placeholder": "https://rss.art19.com/get-played"
+      },
+      "feedName": {
+        "type": "string",
+        "label": "Optional Podcast Name",
+        "helpText": "Overrides the default podcast name harvested from the RSS feed if provided.",
+        "defaultValue": ""
+      },
+      "postLinkUrl": {
+        "type": "string",
+        "label": "Post Link URL",
+        "helpText": "Enter the URL to be used for the Reddit link post. If left blank, it will fall back to the episode audio URL.",
+        "defaultValue": ""
+      },
+      "pollingFrequency": {
+        "type": "select",
+        "label": "Polling Frequency",
+        "options": [
+          {
+            "label": "Hourly",
+            "value": "hourly"
+          },
+          {
+            "label": "Daily",
+            "value": "daily"
+          },
+          {
+            "label": "Weekly",
+            "value": "weekly"
+          }
+        ],
+        "defaultValue": "hourly"
       }
     }
   }

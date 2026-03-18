@@ -11,6 +11,8 @@ import {
 } from "../shared/api.ts";
 import { XMLParser } from "fast-xml-parser";
 
+import { NodeHtmlMarkdown } from 'node-html-markdown';
+
 // ---------------------------------------------------------------------------
 // HTTP entry point
 // ---------------------------------------------------------------------------
@@ -75,6 +77,7 @@ type FeedConfig = {
   url: string;
   nameOverride: string; // may be empty — fall back to RSS <title>
   description: string;
+  postLinkUrl?: string;
 };
 
 type EpisodeData = {
@@ -84,33 +87,26 @@ type EpisodeData = {
   description: string;
   audioUrl: string;
   imageUrl: string;
+  postLinkUrl?: string;
 };
 
-/** Read and parse the paragraph setting text for all feeds. */
 async function getFeeds(): Promise<FeedConfig[]> {
   const feeds: FeedConfig[] = [];
-  const rssListSetting = await settings.get("rssFeedsList");
+  
+  const url = await settings.get<string>("feedUrl");
+  const nameOverride = await settings.get<string>("feedName") || "";
+  const postLinkUrl = await settings.get<string>("postLinkUrl") || "";
 
-  if (typeof rssListSetting !== "string" || !rssListSetting.trim()) {
-    return feeds;
+  if (url && url.trim()) {
+    // We use index 1 so the `last_posted_guid:1` duplication protection logic remains backward compatible
+    feeds.push({ 
+      index: 1, 
+      url: url.trim(), 
+      nameOverride: nameOverride.trim(), 
+      description: "",
+      postLinkUrl: postLinkUrl.trim()
+    });
   }
-
-  // Split on newlines, clean up whitespace, remove empty lines
-  const lines = rssListSetting.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-
-  lines.forEach((line, index) => {
-    // Support separation via pipe (|) or comma (,)
-    const parts = line.split(/[|,]/);
-    // Grab the first part as URL, fix any missing domains/schemes if needed (though assumed full URL)
-    const url = parts[0]?.trim() || "";
-    const nameOverride = parts.length > 1 && parts[1] ? parts[1].trim() : "";
-    const description = parts.length > 2 && parts[2] ? parts.slice(2).join("").trim() : "";
-
-    if (url) {
-      // Use index + 1 so Redis keys match the old format (slot 1, 2, 3...)
-      feeds.push({ index: index + 1, url, nameOverride, description });
-    }
-  });
 
   return feeds;
 }
@@ -122,7 +118,7 @@ async function getFeeds(): Promise<FeedConfig[]> {
 async function fetchLatestEpisode(feed: FeedConfig): Promise<EpisodeData | null> {
   const response = await fetch(feed.url, {
     headers: {
-      "X-Fetch-Reason": feed.description || "Fetching RSS feed to check for new episodes",
+      "X-Fetch-Reason": "Fetching RSS feed to check for new podcast episodes to post to Reddit",
     },
   });
   if (!response.ok) {
@@ -158,8 +154,8 @@ async function fetchLatestEpisode(feed: FeedConfig): Promise<EpisodeData | null>
     item["content:encoded"] ??
     "";
 
-  // Strip HTML tags for plain-text body
-  const description = rawDescription.replace(/<[^>]*>/g, "").trim();
+  // Convert HTML to Markdown for plain-text body
+  const description = NodeHtmlMarkdown.translate(rawDescription).trim();
 
   const audioUrl: string = item.enclosure?.["@_url"] ?? item.link ?? "";
 
@@ -171,18 +167,29 @@ async function fetchLatestEpisode(feed: FeedConfig): Promise<EpisodeData | null>
 
   if (!guid || !episodeTitle) return null;
 
-  return { guid, podcastTitle, episodeTitle, description, audioUrl, imageUrl };
+  return { guid, podcastTitle, episodeTitle, description, audioUrl, imageUrl, postLinkUrl: feed.postLinkUrl };
 }
 
 async function createEpisodePost(episode: EpisodeData): Promise<string> {
   const subreddit = await reddit.getCurrentSubreddit();
   const title = `${episode.podcastTitle} - ${episode.episodeTitle}`;
 
-  const post = await reddit.submitPost({
-    subredditName: subreddit.name,
-    title,
-    text: episode.description || `Listen to the latest episode: ${episode.episodeTitle}`,
-  });
+  let post;
+  const linkUrl = episode.postLinkUrl || episode.audioUrl;
+  
+  if (linkUrl) {
+    post = await reddit.submitPost({
+      subredditName: subreddit.name,
+      title,
+      url: linkUrl,
+    });
+  } else {
+    post = await reddit.submitPost({
+      subredditName: subreddit.name,
+      title,
+      text: episode.description || `Listen to the latest episode: ${episode.episodeTitle}`,
+    });
+  }
 
   console.log(`New post created: ${post.url}`);
   return post.url;
@@ -198,6 +205,16 @@ async function createEpisodePost(episode: EpisodeData): Promise<string> {
  * then updates the per-feed GUID so the cron won't double-post.
  */
 async function onMenuPostLatest(): Promise<UiResponse> {
+  const isEnabled = await settings.get<boolean>("appEnabled");
+  if (isEnabled === false) {
+    return {
+      showToast: {
+        text: "App is disabled in settings.",
+        appearance: "neutral",
+      },
+    };
+  }
+
   const feeds = await getFeeds();
 
   if (feeds.length === 0) {
@@ -245,11 +262,39 @@ async function onMenuPostLatest(): Promise<UiResponse> {
 }
 
 /**
- * Scheduler cron (every 15 min) → only posts when a new episode is detected.
+ * Scheduler cron (every 15 min) → posts conditionally based on configured rate.
  * Each feed is tracked independently via its own Redis key.
  */
 async function onCheckRSS(): Promise<CheckRSSResponse> {
+  const isEnabled = await settings.get<boolean>("appEnabled");
+  if (isEnabled === false) {
+    console.log("Podcast poster is disabled in settings.");
+    return {};
+  }
+
   const feeds = await getFeeds();
+
+  const freq = await settings.get<string>("pollingFrequency") || "15m";
+  const weeklyDay = await settings.get<string>("weeklyPollingDay") || "0";
+  
+  const now = new Date();
+  const todayDateString = now.toISOString().split("T")[0] ?? ""; // YYYY-MM-DD
+  const todayDayOfWeek = now.getUTCDay().toString(); // 0-6
+  
+  // Weekly gating
+  if (freq === "weekly" && todayDayOfWeek !== weeklyDay) {
+    console.log(`Polling set to weekly on day ${weeklyDay}, but today is day ${todayDayOfWeek}. Skipping.`);
+    return {};
+  }
+
+  // Daily or Weekly duplicate-check gating
+  if (freq === "daily" || freq === "weekly") {
+    const lastCheckDate = await redis.get("last_global_check_date");
+    if (lastCheckDate === todayDateString) {
+      // We already checked successfully today
+      return {};
+    }
+  }
 
   for (const feed of feeds) {
     const REDIS_KEY = `last_posted_guid:${feed.index}`;
@@ -273,6 +318,11 @@ async function onCheckRSS(): Promise<CheckRSSResponse> {
     }
   }
 
+  // Mark that we have checked today so the 15m polling ignores remainder of the day
+  if (freq === "daily" || freq === "weekly") {
+    await redis.set("last_global_check_date", todayDateString);
+  }
+
   return {};
 }
 
@@ -291,7 +341,7 @@ function writeJSON<T extends PartialJsonValue>(
   json: Readonly<T>,
   rsp: ServerResponse,
 ): void {
-  const body = JSON.stringify(json);
+  const body = JSON.stringify(json) ?? "";
   const len = Buffer.byteLength(body);
   rsp.writeHead(status, {
     "Content-Length": len,
