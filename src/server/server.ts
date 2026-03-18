@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { reddit, redis, settings } from "@devvit/web/server";
+import { context, reddit, redis, settings } from "@devvit/web/server";
 import type {
+  JsonObject,
   PartialJsonValue,
   TriggerResponse,
   UiResponse,
@@ -8,6 +9,7 @@ import type {
 import {
   ApiEndpoint,
   type CheckRSSResponse,
+  type InitResponse,
 } from "../shared/api.ts";
 import { XMLParser } from "fast-xml-parser";
 
@@ -43,8 +45,11 @@ async function onRequest(
 
   const endpoint = url as ApiEndpoint;
 
-  let body: UiResponse | CheckRSSResponse | TriggerResponse | ErrorResponse;
+  let body: UiResponse | CheckRSSResponse | TriggerResponse | InitResponse | ErrorResponse;
   switch (endpoint) {
+    case ApiEndpoint.Init:
+      body = await onInit();
+      break;
     case ApiEndpoint.OnPostCreate:
       body = await onMenuPostLatest();
       break;
@@ -60,7 +65,7 @@ async function onRequest(
       break;
   }
 
-  writeJSON<PartialJsonValue>("status" in body ? body.status : 200, body, rsp);
+  writeJSON<PartialJsonValue>("status" in body ? (body as ErrorResponse).status : 200, body, rsp);
 }
 
 type ErrorResponse = {
@@ -174,25 +179,70 @@ async function createEpisodePost(episode: EpisodeData): Promise<string> {
   const subreddit = await reddit.getCurrentSubreddit();
   const title = `${episode.podcastTitle} - ${episode.episodeTitle}`;
 
-  let post;
-  const linkUrl = episode.postLinkUrl || episode.audioUrl;
-  
-  if (linkUrl) {
-    post = await reddit.submitPost({
-      subredditName: subreddit.name,
-      title,
-      url: linkUrl,
-    });
-  } else {
-    post = await reddit.submitPost({
-      subredditName: subreddit.name,
-      title,
-      text: episode.description || `Listen to the latest episode: ${episode.episodeTitle}`,
-    });
-  }
+  // postData is capped at 2KB by Devvit — truncate the description to be safe
+  const MAX_DESCRIPTION = 1100;
+  const truncatedDescription = episode.description.length > MAX_DESCRIPTION
+    ? episode.description.slice(0, MAX_DESCRIPTION) + "…"
+    : episode.description;
+
+  // Some CDN image URLs can be very long — cap them too
+  const MAX_URL = 500;
+  const rawImageUrl = episode.imageUrl.length > MAX_URL ? "" : episode.imageUrl;
+
+  // Fall back to subreddit community icon if the RSS feed has no episode art
+  const communityIcon = subreddit.settings.communityIcon ?? "";
+  const imageUrl = rawImageUrl || (communityIcon.length <= MAX_URL ? communityIcon : "");
+
+  const postData: JsonObject = {
+    episodeTitle: episode.episodeTitle,
+    podcastTitle: episode.podcastTitle,
+    description: truncatedDescription,
+    audioUrl: episode.audioUrl,
+    imageUrl,
+    postLinkUrl: episode.postLinkUrl ?? episode.audioUrl ?? "",
+  };
+
+  const serialized = JSON.stringify(postData);
+  console.log(`postData size: ${Buffer.byteLength(serialized)} bytes`);
+
+  const post = await reddit.submitCustomPost({
+    subredditName: subreddit.name,
+    title,
+    entry: "default",
+    postData,
+    textFallback: {
+      text: [
+        `**${episode.episodeTitle}**`,
+        "",
+        episode.postLinkUrl || episode.audioUrl
+          ? `🎙️ [Listen](${episode.postLinkUrl || episode.audioUrl})`
+          : "",
+        "",
+        episode.description,
+      ].filter(Boolean).join("\n"),
+    },
+  });
 
   console.log(`New post created: ${post.url}`);
   return post.url;
+}
+
+// ---------------------------------------------------------------------------
+// Init handler — returns episode data from postData for the client webview
+// ---------------------------------------------------------------------------
+
+async function onInit(): Promise<InitResponse> {
+  const postData = context.postData as JsonObject | null;
+
+  return {
+    type: "init",
+    episodeTitle: (postData?.episodeTitle as string) ?? "Podcast Episode",
+    podcastTitle: (postData?.podcastTitle as string) ?? "",
+    description: (postData?.description as string) ?? "",
+    audioUrl: (postData?.audioUrl as string) ?? "",
+    imageUrl: (postData?.imageUrl as string) ?? "",
+    postLinkUrl: (postData?.postLinkUrl as string) ?? "",
+  };
 }
 
 // ---------------------------------------------------------------------------

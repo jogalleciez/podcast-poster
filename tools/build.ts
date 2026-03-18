@@ -1,6 +1,6 @@
 #!/usr/bin/env -S node --experimental-strip-types
 
-// Bundles server sources to dist/server/.
+// Bundles server and client sources.
 //
 // build.ts [--minify] [--watch]
 // --minify    Minify output.
@@ -11,6 +11,7 @@ import type { BuildOptions } from "esbuild";
 import esbuild from "esbuild";
 
 const watch = process.argv.includes("--watch");
+const minify = process.argv.includes("--minify");
 
 const opts: BuildOptions = {
   bundle: true,
@@ -18,6 +19,7 @@ const opts: BuildOptions = {
   metafile: true,
   sourcemap: "linked",
   target: "es2023",
+  minify,
 };
 
 const serverOpts: BuildOptions = {
@@ -28,11 +30,27 @@ const serverOpts: BuildOptions = {
   platform: "node",
 };
 
+const clientOpts: BuildOptions = {
+  ...opts,
+  entryPoints: ["src/client/splash.ts"],
+  format: "iife",
+  outfile: "public/splash.js",
+  platform: "browser",
+};
+
 if (watch) {
-  const serverCtx = await esbuild.context(serverOpts);
-  await serverCtx.watch();
+  const [serverCtx, clientCtx] = await Promise.all([
+    esbuild.context(serverOpts),
+    esbuild.context(clientOpts),
+  ]);
+  await Promise.all([serverCtx.watch(), clientCtx.watch()]);
 } else {
-  const server = await esbuild.build(serverOpts);
+  const [server, client] = await Promise.all([
+    esbuild.build(serverOpts),
+    esbuild.build(clientOpts),
+  ]);
   if (server.metafile)
     fs.writeFileSync("dist/server.meta.json", JSON.stringify(server.metafile));
+  if (client.metafile)
+    fs.writeFileSync("dist/client.meta.json", JSON.stringify(client.metafile));
 }

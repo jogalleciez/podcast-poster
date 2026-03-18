@@ -1,6 +1,15 @@
 {
   "$schema": "https://developers.reddit.com/schema/config-file.v1.json",
   "name": "podcast-poster",
+  "post": {
+    "dir": "public",
+    "entrypoints": {
+      "default": {
+        "inline": true,
+        "entry": "index.html"
+      }
+    }
+  },
   "server": {
     "dir": "dist/server",
     "entry": "index.js"
@@ -36,49 +45,16 @@
       "enable": true,
       "domains": [
         "rss.art19.com",
-        "omny.fm",
         "traffic.omny.fm",
-        "anchor.fm",
-        "castos.com",
         "feeds.buzzsprout.com",
         "feeds.redcircle.com",
         "feeds.transistor.fm",
         "feeds.captivate.fm",
-        "libsyn.com",
         "feed.podbean.com",
         "media.rss.com",
         "feeds.acast.com",
         "feed.ausha.co",
-        "squarespace.com",
-        "rss.hubhopper.com",
-        "audioboom.com",
-        "awesound.com",
-        "backtracks.fm",
-        "blogtalkradio.com",
-        "blubrry.com",
-        "buzzsprout.com",
-        "fireside.fm",
-        "megaphone.fm",
-        "omnystudio.com",
-        "pinecast.com",
-        "pippa.io",
-        "podbean.com",
-        "podcastblastoff.com",
-        "podcasts.com",
-        "podcastwebsites.com",
-        "podiant.co",
-        "podigee.com",
-        "podomatic.com",
-        "podpoint.com",
-        "shoutengine.com",
-        "simplecast.com",
-        "soundcloud.com",
-        "spreaker.com",
-        "talkshoe.com",
-        "transistor.fm",
-        "trycast.com",
-        "whooshkaa.com",
-        "zencast.fm"
+        "rss.hubhopper.com"
       ]
     }
   },
@@ -134,13 +110,34 @@
         "type": "select",
         "label": "Weekly Polling Day",
         "options": [
-          { "label": "Sunday", "value": "0" },
-          { "label": "Monday", "value": "1" },
-          { "label": "Tuesday", "value": "2" },
-          { "label": "Wednesday", "value": "3" },
-          { "label": "Thursday", "value": "4" },
-          { "label": "Friday", "value": "5" },
-          { "label": "Saturday", "value": "6" }
+          {
+            "label": "Sunday",
+            "value": "0"
+          },
+          {
+            "label": "Monday",
+            "value": "1"
+          },
+          {
+            "label": "Tuesday",
+            "value": "2"
+          },
+          {
+            "label": "Wednesday",
+            "value": "3"
+          },
+          {
+            "label": "Thursday",
+            "value": "4"
+          },
+          {
+            "label": "Friday",
+            "value": "5"
+          },
+          {
+            "label": "Saturday",
+            "value": "6"
+          }
         ],
         "defaultValue": "0"
       }

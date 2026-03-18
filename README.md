@@ -9,9 +9,11 @@ A [Devvit](https://developers.reddit.com) app that automatically creates Reddit 
 ## How It Works
 
 ### 1. Automatic (Cron — every 15 minutes)
+
 The scheduler polls all configured RSS feeds every 15 minutes. Each feed is tracked independently — if a new episode GUID is detected (compared to the last-posted GUID stored in Redis), a new Reddit self-post is created for that feed. Episodes are never duplicated per feed.
 
 ### 2. Manual (Moderator Menu)
+
 Subreddit moderators can immediately post the latest episode from all configured feeds:
 > Three-dot menu → **"Post most recent episode"**
 
@@ -30,16 +32,18 @@ This posts from all active feed slots and updates their GUIDs so the cron won't 
 
 ## Configuration
 
-After installing the app on your subreddit, go to **App Settings** to configure your podcast feeds. 
+After installing the app on your subreddit, go to **App Settings** to configure your podcast feeds.
 
 Find the **RSS Feeds List** setting. You can add as many feeds as you want by entering them on **new lines**. You can optionally provide a custom name for the podcast by separating it with a pipe (`|`) or a comma (`,`).
 
 **Format:**
+
 ```
 https://path/to/feed.xml | Optional Podcast Name
 ```
 
 **Example:**
+
 ```text
 https://rss.art19.com/get-played | Get Played
 https://feeds.megaphone.fm/WWO8086402096 | Conan O'Brien
@@ -81,6 +85,7 @@ devvit.json        # App config (menu, scheduler, settings, HTTP permissions)
 ## Development
 
 ### Prerequisites
+
 - Node.js ≥ 22.6.0
 - A Reddit account with a test subreddit
 - [Devvit CLI](https://developers.reddit.com/docs/devvit_cli): `npm install -g devvit`
@@ -96,6 +101,7 @@ npm run type-check   # TypeScript type checking
 ```
 
 ### Playtest
+
 ```bash
 devvit playtest r/your_test_subreddit
 ```
