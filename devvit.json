@@ -1,15 +1,6 @@
 {
   "$schema": "https://developers.reddit.com/schema/config-file.v1.json",
   "name": "podcast-poster",
-  "post": {
-    "dir": "public",
-    "entrypoints": {
-      "default": {
-        "inline": true,
-        "entry": "index.html"
-      }
-    }
-  },
   "server": {
     "dir": "dist/server",
     "entry": "index.js"
@@ -85,6 +76,18 @@
         "type": "string",
         "label": "Post Link URL",
         "helpText": "Enter the URL to be used for the Reddit link post. If left blank, it will fall back to the episode audio URL.",
+        "defaultValue": ""
+      },
+      "postFlairId": {
+        "type": "string",
+        "label": "Post Flair Template ID",
+        "helpText": "Optional. The flair template ID to apply to each episode post. Find this in your subreddit's Flair settings (it looks like a UUID).",
+        "defaultValue": ""
+      },
+      "postFlairText": {
+        "type": "string",
+        "label": "Post Flair Text Override",
+        "helpText": "Optional. Custom flair text to display. Only used when a Flair Template ID is set above.",
         "defaultValue": ""
       },
       "pollingFrequency": {
