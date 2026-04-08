@@ -29,7 +29,7 @@ The App does not collect, store, or process any personal information from Reddit
 Subreddit moderators provide configuration values when installing the App. These are stored within Devvit's built-in settings system and are scoped to the subreddit installation:
 
 | Setting | Purpose |
-|---------|---------|
+|---------|----------|
 | RSS feed URL | The podcast feed to monitor for new episodes |
 | Podcast name (optional) | Display name override for the podcast |
 | Post link URL (optional) | URL override for the Reddit post link |
@@ -57,7 +57,7 @@ The App uses the above configuration solely to:
 The App stores two pieces of state in Devvit's Redis instance, scoped per subreddit installation:
 
 | Key | Value | Purpose |
-|-----|-------|---------|
+|-----|-------|----------|
 | `last_posted_guid:<index>` | Episode GUID string | Prevents duplicate posts |
 | `last_global_check_date` | ISO date string (YYYY-MM-DD) | Gates daily/weekly polling cadence |
 
