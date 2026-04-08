@@ -1,23 +1,27 @@
 # podcast-poster
 
-> ⚠️ **Work in Progress** — This app is under active development. Automated RSS polling is pending HTTP domain approval from Reddit's team.
-
-A [Devvit](https://developers.reddit.com) app that automatically creates Reddit posts for new podcast episodes from one or more RSS feeds. When a new episode is detected, it creates a self-post with the episode title as the post title and the episode description as the post body.
+A [Devvit](https://developers.reddit.com) app that automatically creates Reddit posts for new podcast episodes from an RSS feed. When a new episode is detected, it creates a self-post with the episode title as the post title, the episode description (converted from HTML to Markdown) as the body, and a "Listen" link to the episode audio.
 
 ---
 
 ## How It Works
 
-### 1. Automatic (Cron — every 15 minutes)
+### 1. Automatic (Cron)
 
-The scheduler polls all configured RSS feeds every 15 minutes. Each feed is tracked independently — if a new episode GUID is detected (compared to the last-posted GUID stored in Redis), a new Reddit self-post is created for that feed. Episodes are never duplicated per feed.
+The scheduler fires every 15 minutes, but only posts according to the configured polling frequency:
+
+- **Hourly** — posts on every cron trigger
+- **Daily** — posts once per UTC day
+- **Weekly** — posts once per week on the configured day of the week
+
+When the cron runs, it fetches the latest episode from the configured RSS feed. If the episode's GUID differs from the last-posted GUID stored in Redis, a new Reddit post is created. Episodes are never duplicated.
 
 ### 2. Manual (Moderator Menu)
 
-Subreddit moderators can immediately post the latest episode from all configured feeds:
+Subreddit moderators can immediately post the latest episode:
 > Three-dot menu → **"Post most recent episode"**
 
-This posts from all active feed slots and updates their GUIDs so the cron won't re-post them.
+This posts the latest episode and updates the stored GUID so the cron won't re-post it.
 
 ---
 
@@ -26,31 +30,26 @@ This posts from all active feed slots and updates their GUIDs so the cron won't 
 | Field | Value |
 |---|---|
 | **Title** | `{Podcast Name} - {Episode Title}` |
-| **Body** | Episode description from RSS feed (HTML stripped) |
+| **Body** | Episode description (HTML converted to Markdown) + `[Listen to this episode](URL)` |
+| **Link URL** | Custom `postLinkUrl` setting if configured, otherwise the episode audio URL |
+| **Flair** | Optional — configured via `postFlairId` / `postFlairText` settings |
 
 ---
 
 ## Configuration
 
-After installing the app on your subreddit, go to **App Settings** to configure your podcast feeds.
+After installing the app on your subreddit, go to **App Settings** to configure it.
 
-Find the **RSS Feeds List** setting. You can add as many feeds as you want by entering them on **new lines**. You can optionally provide a custom name for the podcast by separating it with a pipe (`|`) or a comma (`,`).
-
-**Format:**
-
-```
-https://path/to/feed.xml | Optional Podcast Name
-```
-
-**Example:**
-
-```text
-https://rss.art19.com/get-played | Get Played
-https://feeds.megaphone.fm/WWO8086402096 | Conan O'Brien
-https://feeds.npr.org/510318/podcast.xml
-```
-
-*(If you omit the name override, it will use the podcast title directly from the RSS feed).*
+| Setting | Type | Description |
+|---|---|---|
+| **App Enabled** | Toggle | Enables or disables automatic posting |
+| **Feed URL** | Text | RSS feed URL to monitor |
+| **Feed Name** | Text | Optional podcast name override (falls back to the RSS `<title>`) |
+| **Post Link URL** | Text | Optional URL override for the post link (falls back to the episode audio URL) |
+| **Post Flair ID** | Text | Optional flair template UUID to apply to created posts |
+| **Post Flair Text** | Text | Optional custom flair display text |
+| **Polling Frequency** | Select | `hourly` / `daily` / `weekly` — controls how often new episodes are posted |
+| **Weekly Polling Day** | Select | Day of the week for weekly posting (Sunday–Saturday) |
 
 ---
 
@@ -61,8 +60,9 @@ https://feeds.npr.org/510318/podcast.xml
 | Platform | [Devvit Web](https://developers.reddit.com/docs/capabilities/devvit-web/devvit_web_overview) v0.12.13 |
 | Language | TypeScript 5.x / Node.js ≥ 22.6 |
 | RSS Parsing | [`fast-xml-parser`](https://github.com/NaturalIntelligence/fast-xml-parser) |
+| HTML → Markdown | [`node-html-markdown`](https://github.com/crosstype/node-html-markdown) |
 | Build | `esbuild` via `tools/build.ts` |
-| Storage | Devvit Redis — per-feed GUID tracking via `last_posted_guid:N` |
+| Storage | Devvit Redis — GUID deduplication via `last_posted_guid:1`, daily/weekly gate via `last_global_check_date` |
 
 ---
 
@@ -71,13 +71,16 @@ https://feeds.npr.org/510318/podcast.xml
 ```
 src/
   server/
-    server.ts      # HTTP router, RSS fetch, post creation logic
+    server.ts      # HTTP router, RSS fetching, post creation, cron/menu handlers
     index.ts       # Server entry point
   shared/
-    api.ts         # Endpoint constants
+    api.ts         # Shared endpoint constants and types
 tools/
-  build.ts         # esbuild config (server-only)
-devvit.json        # App config (menu, scheduler, settings, HTTP permissions)
+  build.ts         # esbuild bundler (server, CommonJS, Node.js)
+  tsconfig.*.json  # Modular TypeScript configs
+devvit.json        # App manifest: scheduler, menu, settings, HTTP permissions
+public/
+  snoo.png         # App icon
 ```
 
 ---
@@ -94,7 +97,7 @@ devvit.json        # App config (menu, scheduler, settings, HTTP permissions)
 
 ```bash
 npm run dev          # Watch build + playtest on your test subreddit
-npm run build        # Production build
+npm run build        # Production build (minified)
 npm run deploy       # Build + upload to Devvit
 npm run launch       # Build + upload + publish to Devvit app directory
 npm run type-check   # TypeScript type checking
@@ -108,25 +111,33 @@ devvit playtest r/your_test_subreddit
 
 ---
 
-## Fetch Domains
+## Supported RSS Feed Domains
 
-This app fetches external RSS feeds server-side. The following domains have been submitted for HTTP allowlisting:
+The app is permitted to fetch from the following podcast hosting platforms (allowlisted in `devvit.json`):
 
-| Domain | Purpose |
+| Domain | Provider |
 |---|---|
-| `rss.art19.com` | Default podcast RSS feed host |
-| `omny.fm` | Alternative podcast hosting provider |
-| `traffic.omny.fm` | Omny audio delivery CDN |
+| `rss.art19.com` | Art19 |
+| `traffic.omny.fm` | Omny Studio |
+| `feeds.buzzsprout.com` | Buzzsprout |
+| `feeds.redcircle.com` | RedCircle |
+| `feeds.transistor.fm` | Transistor |
+| `feeds.captivate.fm` | Captivate |
+| `feed.podbean.com` | Podbean |
+| `media.rss.com` | RSS.com |
+| `feeds.acast.com` | Acast |
+| `feed.ausha.co` | Ausha |
+| `rss.hubhopper.com` | HubHopper |
 
-> **Note:** Domain allowlisting requires approval from Reddit's developer team. Until approved, RSS fetching will return a `PERMISSION_DENIED` error. Check approval status at `deveopers.reddit.com/apps/podcast-poster/developler-settings`.
+To use a feed from a domain not listed above, submit a PR adding it to the `permissions.http.domains` array in `devvit.json`.
 
 ---
 
 ## Known Limitations
 
-- **HTTP fetch pending approval** — The RSS polling only works once Reddit approves the domain exceptions.
-- Only the **most recent** entry in each RSS feed is ever posted per check cycle.
-- Up to **5 feeds** per subreddit installation.
+- Only the **most recent** entry in the RSS feed is posted per check cycle.
+- Only **one feed** per subreddit installation is supported.
+- Descriptions are truncated to fit within Devvit's ~2 KB `postData` payload limit.
 
 ---
 
