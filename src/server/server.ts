@@ -55,6 +55,9 @@ async function onRequest(
     case ApiEndpoint.EditPostBodySubmit:
       body = await onFormEditPostBodySubmit(req);
       break;
+    case ApiEndpoint.SelectFeedSubmit:
+      body = await onFormSelectFeedSubmit(req);
+      break;
     case ApiEndpoint.CheckRSS:
       body = await onCheckRSS();
       break;
@@ -97,22 +100,29 @@ type EpisodeData = {
 };
 
 async function getFeeds(): Promise<FeedConfig[]> {
-  const feeds: FeedConfig[] = [];
-  
-  const url = await settings.get<string>("feedUrl");
-  const nameOverride = await settings.get<string>("feedName") || "";
-  const postLinkUrl = await settings.get<string>("postLinkUrl") || "";
+  const feedUrls = await settings.get<string>("feedUrls") || "";
+  const lines = feedUrls
+    .split("\n")
+    .map(line => line.trim())
+    .filter(line => line && !line.startsWith("#"));
 
-  if (url && url.trim()) {
-    // We use index 1 so the `last_posted_guid:1` duplication protection logic remains backward compatible
-    feeds.push({ 
-      index: 1, 
-      url: url.trim(), 
-      nameOverride: nameOverride.trim(), 
-      description: "",
-      postLinkUrl: postLinkUrl.trim()
-    });
-  }
+  const feeds: FeedConfig[] = [];
+  lines.forEach((line, idx) => {
+    const parts = line.split("|").map(p => p.trim());
+    const url = parts[0];
+    const nameOverride = parts[1] || "";
+    const postLinkUrl = parts[2] || "";
+
+    if (url) {
+      feeds.push({
+        index: idx + 1,
+        url,
+        nameOverride,
+        description: "",
+        postLinkUrl,
+      });
+    }
+  });
 
   return feeds;
 }
@@ -216,12 +226,18 @@ async function onMenuEditPostBody(req: IncomingMessage): Promise<UiResponse> {
     showForm: {
       name: "editPostBodyForm",
       form: {
+        title: "Edit Post Body",
+        description: "Edit the body of this episode post using Reddit markdown syntax.",
+        acceptLabel: "Save changes",
         fields: [
           {
             type: "paragraph",
             name: "body",
             label: "Post body (markdown)",
+            helpText: "Supports Reddit markdown syntax (e.g. **bold**, *italic*, [links](url), > blockquote).",
             required: true,
+            defaultValue: currentBody,
+            lineHeight: 15,
           },
         ],
       },
@@ -247,38 +263,20 @@ async function onFormEditPostBodySubmit(req: IncomingMessage): Promise<UiRespons
   await post.edit({ text: body });
   await redis.del(`pending_edit:${userId}`);
 
-  return { showToast: { text: "Post updated.", appearance: "success" } };
+  return {
+    showToast: { text: "Post updated.", appearance: "success" },
+    navigateTo: `https://www.reddit.com${post.permalink}`,
+  };
 }
 
 /**
- * Subreddit menu → "Post most recent episode"
- * Posts the latest episode from every configured feed right now,
- * then updates the per-feed GUID so the cron won't double-post.
+ * Shared helper — posts the latest episode from each feed in the given list.
+ * Returns a UiResponse toast (+ navigateTo on success).
  */
-async function onMenuPostLatest(): Promise<UiResponse> {
-  const isEnabled = await settings.get<boolean>("appEnabled");
-  if (isEnabled === false) {
-    return {
-      showToast: {
-        text: "App is disabled in settings.",
-        appearance: "neutral",
-      },
-    };
-  }
-
-  const feeds = await getFeeds();
-
-  if (feeds.length === 0) {
-    return {
-      showToast: {
-        text: "No feeds configured. Add an RSS URL in App Settings.",
-        appearance: "neutral",
-      },
-    };
-  }
-
+async function postFromFeeds(feeds: FeedConfig[]): Promise<UiResponse> {
   const posted: string[] = [];
   const failed: string[] = [];
+  let firstPostUrl: string | undefined;
 
   for (const feed of feeds) {
     try {
@@ -288,12 +286,17 @@ async function onMenuPostLatest(): Promise<UiResponse> {
         continue;
       }
 
-      await createEpisodePost(episode);
+      const postUrl = await createEpisodePost(episode);
+      firstPostUrl ??= postUrl;
       await redis.set(`last_posted_guid:${feed.index}`, episode.guid);
       posted.push(episode.episodeTitle);
     } catch (e) {
       console.error(`Error posting feed ${feed.index}:`, e);
-      failed.push(`Feed ${feed.index}: ${e}`);
+      const msg = e instanceof Error ? e.message : String(e);
+      const reason = msg.includes("is not allowed")
+        ? "domain not allowlisted"
+        : "unknown error";
+      failed.push(`Feed ${feed.index}: ${reason}`);
     }
   }
 
@@ -301,7 +304,10 @@ async function onMenuPostLatest(): Promise<UiResponse> {
     const summary = posted.length === 1
       ? `Posted: ${posted[0]}`
       : `Posted ${posted.length} episodes`;
-    return { showToast: { text: summary, appearance: "success" } };
+    return {
+      showToast: { text: summary, appearance: "success" },
+      ...(firstPostUrl ? { navigateTo: firstPostUrl } : {}),
+    };
   }
 
   return {
@@ -310,6 +316,75 @@ async function onMenuPostLatest(): Promise<UiResponse> {
       appearance: "neutral",
     },
   };
+}
+
+/**
+ * Subreddit menu → "Post most recent episode"
+ * With 1 feed: posts immediately.
+ * With 2+ feeds: shows a select modal to choose which feed (or all).
+ */
+async function onMenuPostLatest(): Promise<UiResponse> {
+  const isEnabled = await settings.get<boolean>("appEnabled");
+  if (isEnabled === false) {
+    return { showToast: { text: "App is disabled in settings.", appearance: "neutral" } };
+  }
+
+  const feeds = await getFeeds();
+
+  if (feeds.length === 0) {
+    return { showToast: { text: "No feeds configured. Add an RSS URL in App Settings.", appearance: "neutral" } };
+  }
+
+  if (feeds.length === 1) {
+    return postFromFeeds(feeds);
+  }
+
+  return {
+    showForm: {
+      name: "selectFeedForm",
+      form: {
+        title: "Post episode from...",
+        fields: [
+          {
+            type: "select",
+            name: "feedIndex",
+            label: "Choose a feed",
+            required: true,
+            options: [
+              { label: "All Feeds", value: "all" },
+              ...feeds.map(f => ({
+                label: f.nameOverride || f.url,
+                value: String(f.index),
+              })),
+            ],
+          },
+        ],
+      },
+    },
+  };
+}
+
+/**
+ * Form submit → posts from the selected feed (or all feeds).
+ */
+async function onFormSelectFeedSubmit(req: IncomingMessage): Promise<UiResponse> {
+  const { feedIndex } = await readBody<{ feedIndex: string[] }>(req);
+  const selected = feedIndex?.[0];
+  const allFeeds = await getFeeds();
+
+  if (!selected || allFeeds.length === 0) {
+    return { showToast: { text: "No feeds configured.", appearance: "neutral" } };
+  }
+
+  const feedsToPost = selected === "all"
+    ? allFeeds
+    : allFeeds.filter(f => String(f.index) === selected);
+
+  if (feedsToPost.length === 0) {
+    return { showToast: { text: "Selected feed not found.", appearance: "neutral" } };
+  }
+
+  return postFromFeeds(feedsToPost);
 }
 
 /**
@@ -380,6 +455,37 @@ async function onCheckRSS(): Promise<CheckRSSResponse> {
 /** App install trigger */
 async function onAppInstall(): Promise<TriggerResponse> {
   console.log("podcast-poster installed. Configure RSS feeds in App Settings.");
+
+  // Backward compatibility: migrate old single-feed settings to new multi-feed format
+  try {
+    const oldFeedUrl = await settings.get<string>("feedUrl");
+    const oldFeedName = await settings.get<string>("feedName");
+    const oldPostLinkUrl = await settings.get<string>("postLinkUrl");
+
+    if (oldFeedUrl && oldFeedUrl.trim()) {
+      // Check if feedUrls is already set (skip if already migrated)
+      const newFeedUrls = await settings.get<string>("feedUrls");
+      if (!newFeedUrls || !newFeedUrls.trim()) {
+        // Construct new multi-feed format
+        let migratedLine = oldFeedUrl.trim();
+        if (oldFeedName && oldFeedName.trim()) {
+          migratedLine += ` | ${oldFeedName.trim()}`;
+        } else if (oldPostLinkUrl && oldPostLinkUrl.trim()) {
+          migratedLine += " | ";
+        }
+        if (oldPostLinkUrl && oldPostLinkUrl.trim()) {
+          migratedLine += ` | ${oldPostLinkUrl.trim()}`;
+        }
+
+        console.log(
+          `Migrating old single-feed settings to new multi-feed format: ${migratedLine}`
+        );
+      }
+    }
+  } catch (err) {
+    console.error("Error during backward compatibility migration:", err);
+  }
+
   return {};
 }
 

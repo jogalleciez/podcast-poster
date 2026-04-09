@@ -24,7 +24,8 @@
     ]
   },
   "forms": {
-    "editPostBodyForm": "/internal/form/edit-post-body-submit"
+    "editPostBodyForm": "/internal/form/edit-post-body-submit",
+    "selectFeedForm": "/internal/form/select-feed-submit"
   },
   "triggers": {
     "onAppInstall": "/internal/on-app-install"
@@ -42,6 +43,7 @@
     "build": "node --experimental-strip-types ./tools/build.ts --minify"
   },
   "permissions": {
+    "reddit": true,
     "http": {
       "enable": true,
       "domains": [
@@ -55,7 +57,8 @@
         "media.rss.com",
         "feeds.acast.com",
         "feed.ausha.co",
-        "rss.hubhopper.com"
+        "rss.hubhopper.com",
+        "feeds.simplecast.com"
       ]
     }
   },
@@ -70,22 +73,10 @@
         "helpText": "Turn this on to enable automatic checking and posting of new podcast episodes.",
         "defaultValue": true
       },
-      "feedUrl": {
-        "type": "string",
-        "label": "RSS Feed URL",
-        "helpText": "Enter the URL of the podcast RSS feed. e.g. https://rss.art19.com/get-played",
-        "defaultValue": ""
-      },
-      "feedName": {
-        "type": "string",
-        "label": "Optional Podcast Name",
-        "helpText": "Overrides the default podcast name harvested from the RSS feed if provided.",
-        "defaultValue": ""
-      },
-      "postLinkUrl": {
-        "type": "string",
-        "label": "Post Link URL",
-        "helpText": "Enter the URL to be used for the Reddit link post. If left blank, it will fall back to the episode audio URL.",
+      "feedUrls": {
+        "type": "paragraph",
+        "label": "RSS Feed URLs",
+        "helpText": "One feed per line, format: URL | Podcast Name | Link URL. Only the URL is required. See the README for examples and details.",
         "defaultValue": ""
       },
       "postFlairId": {

@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**podcast-poster** is a Reddit Devvit application that automatically posts the latest episodes from RSS podcast feeds to a subreddit. It runs on the Devvit platform (v0.12.13) with a Node.js backend and a browser-based webview for an embedded podcast player. The application handles RSS polling, post creation, and playback via a custom webview.
+**podcast-poster** is a Reddit Devvit application that automatically posts the latest episodes from one or more RSS podcast feeds to a subreddit. It runs on the Devvit platform (v0.12.18) with a Node.js backend and a browser-based webview for an embedded podcast player. The application handles RSS polling, post creation, and playback via a custom webview.
 
-**Why it exists:** Subreddit moderators configure a single RSS feed per installation. The app periodically checks the feed for new episodes and posts them automatically to the subreddit. Users can play episodes directly from the embedded webview player without leaving Reddit.
+**Why it exists:** Subreddit moderators configure one or more RSS feeds per installation via a simple text setting. The app periodically checks each feed for new episodes and posts them automatically to the subreddit. Users can play episodes directly from the embedded webview player without leaving Reddit.
 
 ## Quick Start Commands
 
@@ -95,12 +95,16 @@ The server exposes 4 endpoints (all POST):
 Request/response types are defined in `src/shared/api.ts`.
 
 ### Redis State Management
-The app tracks the last-posted episode GUID to avoid duplicates:
+The app tracks the last-posted episode GUID per-feed to avoid duplicates:
 ```
-Key: `last_posted_guid:1`
+Key: `last_posted_guid:{feed.index}`
 Value: GUID string
 ```
-The key uses index `1` (hardcoded in `getFeeds()`) to maintain backward compatibility. **Pattern:** Always namespace Redis keys with context. Don't rely solely on global keys if features might scale.
+Each feed gets a sequential 1-based index (1, 2, 3, ...) based on its position in the `feedUrls` setting. **Pattern:** Always namespace Redis keys with context to support multi-item features.
+
+Additional keys:
+- `pending_edit:{userId}` — Stores post ID during form edit (10-minute expiration)
+- `last_global_check_date` — Tracks date of last global check for daily/weekly gating
 
 ### Subreddit Settings
 Configured by moderators in the Devvit app settings:
@@ -108,13 +112,20 @@ Configured by moderators in the Devvit app settings:
 | Setting | Type | Purpose |
 |---------|------|---------|
 | `appEnabled` | boolean | Enables/disables automatic posting |
-| `feedUrl` | string | RSS feed URL to monitor |
-| `feedName` | string | Optional name override (falls back to RSS `<title>`) |
-| `postLinkUrl` | string | Optional URL for the Reddit link post (falls back to audio URL) |
-| `pollingFrequency` | select | `hourly` / `daily` / `weekly` — controls actual posting cadence |
+| `feedUrls` | paragraph | Multi-feed configuration: one per line, format `URL [| Name [| LinkUrl]]` |
+| `postFlairId` | string | Optional flair template ID to apply to each post |
+| `postFlairText` | string | Optional flair text override |
+| `pollingFrequency` | select | `hourly` / `daily` / `weekly` — controls posting cadence for all feeds |
 | `weeklyPollingDay` | select | Day of week for weekly posting (0=Sunday … 6=Saturday) |
 
-The cron job fires every 15 minutes but `onCheckRSS` skips posting if the current time doesn't match the configured `pollingFrequency`.
+The cron job fires every 15 minutes but `onCheckRSS` skips posting if the current time doesn't match the configured `pollingFrequency`. All feeds share the same polling schedule.
+
+### Multi-Feed Architecture
+The `getFeeds()` function (lines 99–118) parses the `feedUrls` setting and returns a `FeedConfig[]` array:
+- Splits on newlines, trims whitespace, skips comments (lines starting with `#`)
+- Each line is split on `|` to extract URL, optional name, optional link URL
+- Feeds are assigned sequential indices (1, 2, 3, ...) for Redis key namespacing
+- The loop handlers (`onCheckRSS`, `onMenuPostLatest`, `onMenuEditPostBody`) already iterate feeds correctly
 
 ### Webview Lifecycle
 The podcast player in `src/client/splash.ts` must respect user viewport changes:
