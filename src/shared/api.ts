@@ -3,6 +3,8 @@ export type CheckRSSResponse = {};
 
 export const ApiEndpoint = {
   OnPostCreate: "/internal/menu/post-create",
+  EditPostBodyMenu: "/internal/menu/edit-post-body",
+  EditPostBodySubmit: "/internal/form/edit-post-body-submit",
   OnAppInstall: "/internal/on-app-install",
   CheckRSS: "/internal/cron/check-rss",
 } as const;

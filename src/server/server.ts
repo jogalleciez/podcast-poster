@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { reddit, redis, settings } from "@devvit/web/server";
+import { context, reddit, redis, settings } from "@devvit/web/server";
 import type {
+  MenuItemRequest,
   PartialJsonValue,
   TriggerResponse,
   UiResponse,
@@ -47,6 +48,12 @@ async function onRequest(
   switch (endpoint) {
     case ApiEndpoint.OnPostCreate:
       body = await onMenuPostLatest();
+      break;
+    case ApiEndpoint.EditPostBodyMenu:
+      body = await onMenuEditPostBody(req);
+      break;
+    case ApiEndpoint.EditPostBodySubmit:
+      body = await onFormEditPostBodySubmit(req);
       break;
     case ApiEndpoint.CheckRSS:
       body = await onCheckRSS();
@@ -191,6 +198,59 @@ async function createEpisodePost(episode: EpisodeData): Promise<string> {
 // ---------------------------------------------------------------------------
 
 /**
+ * Post menu → "Edit post body" (moderator only)
+ * Shows a pre-populated form with the current post body.
+ * Stores the post ID in Redis so the submit handler can retrieve it.
+ */
+async function onMenuEditPostBody(req: IncomingMessage): Promise<UiResponse> {
+  const { targetId } = await readBody<MenuItemRequest>(req);
+  const post = await reddit.getPostById(targetId as `t3_${string}`);
+  const currentBody = post.body ?? "";
+  const userId = context.userId ?? "unknown";
+
+  await redis.set(`pending_edit:${userId}`, targetId, {
+    expiration: new Date(Date.now() + 600_000), // 10 minutes
+  });
+
+  return {
+    showForm: {
+      name: "editPostBodyForm",
+      form: {
+        fields: [
+          {
+            type: "paragraph",
+            name: "body",
+            label: "Post body (markdown)",
+            required: true,
+          },
+        ],
+      },
+      data: { body: currentBody },
+    },
+  };
+}
+
+/**
+ * Form submit → saves the edited body to the post.
+ * Retrieves the target post ID from Redis using the current user's ID.
+ */
+async function onFormEditPostBodySubmit(req: IncomingMessage): Promise<UiResponse> {
+  const { body } = await readBody<{ body: string }>(req);
+  const userId = context.userId ?? "unknown";
+  const postId = await redis.get(`pending_edit:${userId}`);
+
+  if (!postId) {
+    return { showToast: { text: "Session expired — please try again.", appearance: "neutral" } };
+  }
+
+  const post = await reddit.getPostById(postId as `t3_${string}`);
+  await post.edit({ text: body });
+  await redis.del(`pending_edit:${userId}`);
+
+  return { showToast: { text: "Post updated.", appearance: "success" } };
+}
+
+/**
  * Subreddit menu → "Post most recent episode"
  * Posts the latest episode from every configured feed right now,
  * then updates the per-feed GUID so the cron won't double-post.
@@ -326,6 +386,15 @@ async function onAppInstall(): Promise<TriggerResponse> {
 // ---------------------------------------------------------------------------
 // Utility
 // ---------------------------------------------------------------------------
+
+function readBody<T>(req: IncomingMessage): Promise<T> {
+  return new Promise((resolve, reject) => {
+    let raw = "";
+    req.on("data", (chunk: Buffer) => { raw += chunk.toString(); });
+    req.on("end", () => { resolve(JSON.parse(raw) as T); });
+    req.on("error", reject);
+  });
+}
 
 function writeJSON<T extends PartialJsonValue>(
   status: number,

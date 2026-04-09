@@ -13,8 +13,18 @@
         "location": "subreddit",
         "forUserType": "moderator",
         "endpoint": "/internal/menu/post-create"
+      },
+      {
+        "label": "Edit post body",
+        "description": "Edit the text body of this episode post.",
+        "location": "post",
+        "forUserType": "moderator",
+        "endpoint": "/internal/menu/edit-post-body"
       }
     ]
+  },
+  "forms": {
+    "editPostBodyForm": "/internal/form/edit-post-body-submit"
   },
   "triggers": {
     "onAppInstall": "/internal/on-app-install"
