@@ -4,3 +4,6 @@ dist
 .env
 public/*.js
 public/*.js.map
+mcp.json
+.cursor/
+.vscode/
