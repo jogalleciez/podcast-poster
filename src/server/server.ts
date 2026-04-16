@@ -174,7 +174,7 @@ async function fetchLatestEpisode(feed: FeedConfig): Promise<EpisodeData | null>
   // Convert HTML to Markdown for plain-text body
   const description = NodeHtmlMarkdown.translate(rawDescription).trim();
 
-  const audioUrl: string = item.enclosure?.["@_url"] ?? "";
+  const audioUrl: string = item.enclosure?.["@_url"] ?? item.link ?? "";
   const linkUrl: string = item.link ?? "";
 
   if (!guid || !episodeTitle) return null;
