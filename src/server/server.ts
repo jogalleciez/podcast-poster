@@ -96,6 +96,7 @@ type EpisodeData = {
   episodeTitle: string;
   description: string;
   audioUrl: string;
+  linkUrl: string;
   postLinkUrl?: string;
 };
 
@@ -173,18 +174,24 @@ async function fetchLatestEpisode(feed: FeedConfig): Promise<EpisodeData | null>
   // Convert HTML to Markdown for plain-text body
   const description = NodeHtmlMarkdown.translate(rawDescription).trim();
 
-  const audioUrl: string = item.enclosure?.["@_url"] ?? item.link ?? "";
+  const audioUrl: string = item.enclosure?.["@_url"] ?? "";
+  const linkUrl: string = item.link ?? "";
 
   if (!guid || !episodeTitle) return null;
 
-  return { guid, podcastTitle, episodeTitle, description, audioUrl, postLinkUrl: feed.postLinkUrl };
+  return { guid, podcastTitle, episodeTitle, description, audioUrl, linkUrl, postLinkUrl: feed.postLinkUrl };
 }
 
 async function createEpisodePost(episode: EpisodeData): Promise<string> {
   const subreddit = await reddit.getCurrentSubreddit();
   const title = `${episode.podcastTitle} - ${episode.episodeTitle}`;
 
-  const linkUrl = episode.postLinkUrl || episode.audioUrl;
+  let linkUrl: string;
+  if (episode.postLinkUrl === "link") {
+    linkUrl = episode.linkUrl;
+  } else {
+    linkUrl = episode.postLinkUrl || episode.audioUrl;
+  }
   const body = linkUrl
     ? `${episode.description}\n\n[Listen to this episode](${linkUrl})`
     : episode.description;
@@ -280,7 +287,7 @@ async function postFromFeeds(feeds: FeedConfig[]): Promise<UiResponse> {
 
   for (const feed of feeds) {
     try {
-      const episode = await fetchLatestEpisode(feed);
+      const episode = await (feed);
       if (!episode) {
         failed.push(`Feed ${feed.index}: no episodes found`);
         continue;
