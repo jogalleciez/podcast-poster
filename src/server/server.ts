@@ -287,7 +287,7 @@ async function postFromFeeds(feeds: FeedConfig[]): Promise<UiResponse> {
 
   for (const feed of feeds) {
     try {
-      const episode = await (feed);
+      const episode = await fetchLatestEpisode(feed);
       if (!episode) {
         failed.push(`Feed ${feed.index}: no episodes found`);
         continue;
