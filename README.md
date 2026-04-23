@@ -65,6 +65,7 @@ After installing, go to **App Settings** to configure the app.
 **Feed URL Format Details:**
 
 Each line in the **RSS Feed URLs** field follows this format:
+
 ```
 URL | Podcast Name | Link URL
 ```
@@ -74,6 +75,7 @@ URL | Podcast Name | Link URL
 - **Link URL** (optional) — URL for the "Listen to this episode" link. Generally intended for a splash page for the podcast. If omitted, falls back to the episode's audio URL.
 
 **Examples:**
+
 ```
 https://rss.art19.com/get-played | Get Played
 https://feeds.transistor.fm/my-podcast | | https://my-podcast.com/listen
@@ -103,7 +105,7 @@ The following podcast hosting providers are supported out of the box:
 | `rss.hubhopper.com` |
 | `feeds.simplecast.com` |
 
-Need a different host? Open an issue or contact the developer.
+Need a different host? Open an [issue](https://github.com/jogalleciez/podcast-poster/issues/new) or [contact the developer](https://www.reddit.com/message/compose/?to=/u/jogalleciez).
 
 ---
 
@@ -127,13 +129,6 @@ Need a different host? Open an issue or contact the developer.
 
 ---
 
-## Development
-
-See [AGENTS.md](AGENTS.md) for setup instructions, command reference, and code style guidelines.
-
----
-
 ## License
 
 BSD-3-Clause
-

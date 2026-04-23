@@ -97,6 +97,7 @@ type EpisodeData = {
   description: string;
   audioUrl: string;
   postLinkUrl?: string;
+  imageUrl?: string;
 };
 
 async function getFeeds(): Promise<FeedConfig[]> {
@@ -175,9 +176,15 @@ async function fetchLatestEpisode(feed: FeedConfig): Promise<EpisodeData | null>
 
   const audioUrl: string = item.enclosure?.["@_url"] ?? item.link ?? "";
 
+  const imageUrl: string | undefined =
+    item["itunes:image"]?.["@_href"] ??
+    channel["itunes:image"]?.["@_href"] ??
+    channel.image?.url ??
+    undefined;
+
   if (!guid || !episodeTitle) return null;
 
-  return { guid, podcastTitle, episodeTitle, description, audioUrl, postLinkUrl: feed.postLinkUrl };
+  return { guid, podcastTitle, episodeTitle, description, audioUrl, postLinkUrl: feed.postLinkUrl, imageUrl };
 }
 
 async function createEpisodePost(episode: EpisodeData): Promise<string> {
@@ -185,9 +192,14 @@ async function createEpisodePost(episode: EpisodeData): Promise<string> {
   const title = `${episode.podcastTitle} - ${episode.episodeTitle}`;
 
   const linkUrl = episode.postLinkUrl || episode.audioUrl;
-  const body = linkUrl
-    ? `${episode.description}\n\n[Listen to this episode](${linkUrl})`
-    : episode.description;
+  let body = episode.description;
+  if (linkUrl) {
+    if (episode.imageUrl) {
+      body += `\n\n[![Listen to this episode](${episode.imageUrl})](${linkUrl})`;
+    } else {
+      body += `\n\n[Listen to this episode](${linkUrl})`;
+    }
+  }
 
   const flairId = (await settings.get<string>("postFlairId"))?.trim() || undefined;
   const flairText = (await settings.get<string>("postFlairText"))?.trim() || undefined;
