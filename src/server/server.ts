@@ -132,7 +132,71 @@ async function getFeeds(): Promise<FeedConfig[]> {
 // RSS helpers
 // ---------------------------------------------------------------------------
 
+type SpreakerListResponse = {
+  response: { items: Array<{ episode_id: number }> };
+};
+
+type SpreakerEpisodeDetail = {
+  episode_id: number;
+  title?: string;
+  description?: string;
+  description_html?: string;
+  rss_guid?: string;
+  download_url?: string;
+  playback_url?: string;
+  media_url?: string;
+  site_url?: string;
+  show?: { title?: string };
+};
+
+type SpreakerDetailResponse = {
+  response: { episode: SpreakerEpisodeDetail };
+};
+
+function extractSpreakerShowId(url: string): string | null {
+  return url.match(/spreaker\.com\/show\/(\d+)/)?.[1] ?? null;
+}
+
+async function fetchSpreakerEpisode(feed: FeedConfig): Promise<EpisodeData | null> {
+  const showId = extractSpreakerShowId(feed.url)!;
+  const fetchOpts = {
+    headers: { "X-Fetch-Reason": "Fetching Spreaker episode data to post to Reddit" },
+  };
+
+  const listResp = await fetch(
+    `https://api.spreaker.com/v2/shows/${showId}/episodes?limit=1`,
+    fetchOpts,
+  );
+  if (!listResp.ok) throw new Error(`Spreaker episodes list failed: ${listResp.status}`);
+  const listData = (await listResp.json()) as SpreakerListResponse;
+  const episodeId = listData.response?.items?.[0]?.episode_id;
+  if (!episodeId) return null;
+
+  const detailResp = await fetch(
+    `https://api.spreaker.com/v2/episodes/${episodeId}`,
+    fetchOpts,
+  );
+  if (!detailResp.ok) throw new Error(`Spreaker episode detail failed: ${detailResp.status}`);
+  const detailData = (await detailResp.json()) as SpreakerDetailResponse;
+  const ep = detailData.response?.episode;
+  if (!ep) return null;
+
+  const podcastTitle = feed.nameOverride || ep.show?.title || "Podcast";
+  const guid = ep.rss_guid || String(ep.episode_id);
+  const episodeTitle = ep.title ?? "Untitled Episode";
+  const rawDescription = ep.description_html || ep.description || "";
+  const description = NodeHtmlMarkdown.translate(rawDescription).trim();
+  const audioUrl = ep.download_url || ep.playback_url || ep.media_url || "";
+  const linkUrl = ep.site_url || "";
+
+  return { guid, podcastTitle, episodeTitle, description, audioUrl, linkUrl, postLinkUrl: feed.postLinkUrl };
+}
+
 async function fetchLatestEpisode(feed: FeedConfig): Promise<EpisodeData | null> {
+  if (extractSpreakerShowId(feed.url)) {
+    return fetchSpreakerEpisode(feed);
+  }
+
   const response = await fetch(feed.url, {
     headers: {
       "X-Fetch-Reason": "Fetching RSS feed to check for new podcast episodes to post to Reddit",
