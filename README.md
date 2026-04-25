@@ -131,6 +131,7 @@ Need a different host? Open an [issue](https://github.com/jogalleciez/podcast-po
 
 - Only the **most recent** entry in the RSS feed is posted per check cycle.
 - Post descriptions are truncated to fit Devvit's ~2KB payload limit.
+- Only podcast hosts in the [allowlist](#supported-rss-feed-hosts) above are supported — Devvit requires all external domains to be pre-approved. Hosts not on the list will fail silently at fetch time.
 
 ---
 
