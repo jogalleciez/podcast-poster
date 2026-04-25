@@ -63,11 +63,9 @@
         "mp3s.simplecast.com",
         "cdn.simplecast.com",
         "image.simplecastcdn.com",
-        "injector.simplecastaudio.com",
         "api.spreaker.com",
         "cdn.atp.fm",
-        "podcasts.files.bbci.co.uk",
-        "content.production.cdn.art19.com"
+        "podcasts.files.bbci.co.uk"
       ]
     }
   },
