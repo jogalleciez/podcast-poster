@@ -90,20 +90,25 @@ In the first example, the feed will be titled "Get Played". In the second, the p
 
 The following podcast hosting providers are supported out of the box:
 
-| Domain |
-|---|
-| `rss.art19.com` |
-| `traffic.omny.fm` |
-| `feeds.buzzsprout.com` |
-| `feeds.redcircle.com` |
-| `feeds.transistor.fm` |
-| `feeds.captivate.fm` |
-| `feed.podbean.com` |
-| `media.rss.com` |
-| `feeds.acast.com` |
-| `feed.ausha.co` |
-| `rss.hubhopper.com` |
-| `feeds.simplecast.com` |
+| Provider | Domain(s) |
+|---|---|
+| **Acast** | `feeds.acast.com` |
+| **Art19** | `rss.art19.com` |
+| **ATP.fm** | `cdn.atp.fm` |
+| **Ausha** | `feed.ausha.co` |
+| **BBC Podcasts** | `podcasts.files.bbci.co.uk` |
+| **Buzzsprout** | `feeds.buzzsprout.com` |
+| **Captivate** | `feeds.captivate.fm` |
+| **HubHopper** | `rss.hubhopper.com` |
+| **Omny Studio** | `traffic.omny.fm` |
+| **Podbean** | `feed.podbean.com` |
+| **RedCircle** | `feeds.redcircle.com` |
+| **RSS.com** | `media.rss.com` |
+| **Simplecast** | `feeds.simplecast.com`, `api.simplecast.com`, `mp3s.simplecast.com`, `cdn.simplecast.com`, `image.simplecastcdn.com` |
+| **Spreaker** | `api.spreaker.com` ¹ |
+| **Transistor** | `feeds.transistor.fm` |
+
+> ¹ Enter your `https://www.spreaker.com/show/{id}/episodes/feed` URL as-is — the app automatically fetches episode data through the Spreaker JSON API.
 
 Need a different host? Open an [issue](https://github.com/jogalleciez/podcast-poster/issues/new) or [contact the developer](https://www.reddit.com/message/compose/?to=/u/jogalleciez).
 
