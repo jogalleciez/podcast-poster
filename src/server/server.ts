@@ -96,8 +96,8 @@ type EpisodeData = {
   episodeTitle: string;
   description: string;
   audioUrl: string;
+  linkUrl: string;
   postLinkUrl?: string;
-  imageUrl?: string;
 };
 
 async function getFeeds(): Promise<FeedConfig[]> {
@@ -175,30 +175,27 @@ async function fetchLatestEpisode(feed: FeedConfig): Promise<EpisodeData | null>
   const description = NodeHtmlMarkdown.translate(rawDescription).trim();
 
   const audioUrl: string = item.enclosure?.["@_url"] ?? item.link ?? "";
-
-  const imageUrl: string | undefined =
-    item["itunes:image"]?.["@_href"] ??
-    channel["itunes:image"]?.["@_href"] ??
-    channel.image?.url ??
-    undefined;
+  const linkUrl: string = item.link ?? "";
 
   if (!guid || !episodeTitle) return null;
 
-  return { guid, podcastTitle, episodeTitle, description, audioUrl, postLinkUrl: feed.postLinkUrl, imageUrl };
+  return { guid, podcastTitle, episodeTitle, description, audioUrl, linkUrl, postLinkUrl: feed.postLinkUrl };
 }
 
 async function createEpisodePost(episode: EpisodeData): Promise<string> {
   const subreddit = await reddit.getCurrentSubreddit();
   const title = `${episode.podcastTitle} - ${episode.episodeTitle}`;
 
-  const linkUrl = episode.postLinkUrl || episode.audioUrl;
+  let resolvedLinkUrl: string;
+  if (episode.postLinkUrl === "link") {
+    resolvedLinkUrl = episode.linkUrl;
+  } else {
+    resolvedLinkUrl = episode.postLinkUrl || episode.audioUrl;
+  }
+
   let body = episode.description;
-  if (linkUrl) {
-    if (episode.imageUrl) {
-      body += `\n\n[![Listen to this episode](${episode.imageUrl})](${linkUrl})`;
-    } else {
-      body += `\n\n[Listen to this episode](${linkUrl})`;
-    }
+  if (resolvedLinkUrl) {
+    body += `\n\n# [Listen to this episode](${resolvedLinkUrl})`;
   }
 
   const flairId = (await settings.get<string>("postFlairId"))?.trim() || undefined;

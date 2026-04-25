@@ -1,16 +1,17 @@
 # AGENTS.md
 
-This document provides operational guidelines, commands, and code style rules for AI coding agents (and humans) operating within the `podcast-poster` repository. 
+This document provides operational guidelines, commands, and code style rules for AI coding agents (and humans) operating within the `podcast-poster` repository.
 
 ## Project Overview
 
-This is a Reddit Devvit application built with TypeScript and Node.js (v22.6.0+). The app consists of a backend that interacts with the Reddit API and Devvit's Redis, and a custom post webview frontend.
+This is a Reddit Devvit application (v0.12.18) built with TypeScript and Node.js (v22.6.0+). The app automatically posts the latest episodes from one or more RSS podcast feeds to a subreddit as standard Reddit self-posts. Moderators configure feeds via app settings; the app polls RSS feeds on a schedule and creates text posts with the episode title, description (HTML converted to Markdown), and a listen link.
 
 ### Directory Structure
-- `src/server/`: Backend execution context (Reddit API, Redis, HTTP endpoints, Devvit SDK).
-- `src/client/`: Webview frontend scripts (runs in the user's browser context).
-- `src/shared/`: Shared types, constants, and API endpoints utilized by both client and server.
-- `tools/`: Build scripts (e.g., esbuild).
+- `src/server/`: Backend execution context (HTTP request routing, RSS fetching, Reddit post creation, Redis state management). This is the only active source directory.
+- `src/shared/`: Shared types, constants, and API endpoint definitions used by the server.
+- `src/client/`: **Empty / legacy.** Previously housed the webview frontend for an embedded podcast player. The webview was removed; posts are now plain self-posts.
+- `tools/`: Build scripts (`build.ts`) and modular TypeScript configuration files.
+- `public/`: Contains a compiled `splash.js` artifact (legacy from the removed webview). The active build does not produce client bundles.
 
 ---
 
@@ -19,21 +20,20 @@ This is a Reddit Devvit application built with TypeScript and Node.js (v22.6.0+)
 ### Build and Deployment
 Always ensure the build and type-checks succeed before pushing code or creating a pull request.
 - **Build Project:** `npm run build`
-  Runs the custom esbuild script (`tools/build.ts`) to bundle the frontend and backend.
+  Runs the custom esbuild script (`tools/build.ts`) with `--minify` to bundle the server into `dist/server/index.js` (CommonJS). The build only bundles the server; there is no active client bundle step.
 - **Type Check:** `npm run type-check`
-  Runs the TypeScript compiler to ensure strict type safety (`tsc --build`). Never skip this step.
+  Runs `tsc --build` across the TypeScript project references (server, shared). Never skip this step.
 - **Start Local Dev Environment:** `npm run dev`
-  Deploys a test version of the app to your configured Reddit test subreddit using `devvit playtest`.
+  Deploys a test version of the app to the configured Reddit test subreddit using `devvit playtest`. The `devvit.json` also defines a `"dev"` script that runs the build in `--watch` mode.
 - **Deploy:** `npm run deploy`
-  Builds and uploads the app to Devvit.
+  Builds and uploads the app to Devvit (`npm run build && devvit upload`).
 - **Publish:** `npm run launch`
-  Builds, deploys, and publishes the application.
+  Builds, deploys, and publishes the application to the Devvit app directory.
 
 ### Testing
-*Note: Ensure tests are run before submitting code. If tests fail, fix them before proceeding.*
-This project targets Node.js 22+. For testing, the native Node test runner (`node --test`) is the preferred standard unless another framework (like Vitest) is explicitly installed.
+*Note: This project currently has no test files. If you add tests, use the native Node.js test runner (`node --test`), which is the project's preferred standard.*
 
-- **Run all tests:** 
+- **Run all tests (when tests exist):**
   ```bash
   node --test
   ```
@@ -91,23 +91,25 @@ This project targets Node.js 22+. For testing, the native Node test runner (`nod
   writeJSON<ErrorResponse>(500, { error: msg, status: 500 }, rsp);
   ```
 - **Logging:** Log critical errors using `console.error` for debugging in Devvit's telemetry logs.
-- **Uncaught Promises:** Always `await` promises or attach a `.catch()` for background execution (e.g., `audio.play().catch(console.error);`).
+- **Uncaught Promises:** Always `await` promises or attach a `.catch()` for background execution.
 
 ### 6. Architecture & Platform Specifics
-- **Defensive Data Limits:** Devvit sets limits on payload sizes (e.g., `postData` is capped at ~2KB). Always truncate large strings like descriptions or URLs before sending them via Devvit SDK methods (`reddit.submitCustomPost`).
-- **Redis Key Management:** When adding new state or caching, namespace Redis keys logically. If state is per-feed or per-entity, include a unique ID in the key (e.g., `last_posted_guid:${feed.index}`). Do not rely solely on global keys if a feature might scale to multiple entities.
-- **Webview Lifecycle:** In `src/client/`, always respect the user's viewport. Listen to the `visibilitychange` event to pause audio or heavy animations when the user scrolls away from the Devvit post.
-  ```typescript
-  document.addEventListener("visibilitychange", () => {
-    if (document.hidden && isPlaying) {
-      audio.pause();
-    }
-  });
-  ```
+- **Defensive Data Limits:** Devvit imposes limits on payload sizes and post bodies. Truncate large strings like descriptions before submitting posts via `reddit.submitPost`.
+- **Redis Key Management:** When adding new state or caching, namespace Redis keys logically. If state is per-feed or per-entity, include a unique ID in the key.
+  - Existing keys:
+    - `last_posted_guid:${feed.index}` — tracks the last posted episode GUID per feed.
+    - `pending_edit:${userId}` — stores the post ID during a body-edit flow (10-minute expiration).
+    - `last_global_check_date` — stores `YYYY-MM-DD` to gate daily/weekly polling frequency.
+  - Do not rely solely on global keys if a feature might scale to multiple entities.
 - **External Dependencies:** Only introduce external dependencies if absolutely necessary. The Devvit runtime is lightweight. When fetching external data, make sure to set appropriate headers like `X-Fetch-Reason` to comply with platform policies.
+- **HTTP Domain Allowlisting:** All external RSS feed domains must be explicitly allowlisted in `devvit.json` under `permissions.http.domains`. Requests to unlisted domains will fail at runtime.
+
+---
 
 ## AI Agent Directives
+
 - **Do not assume test commands:** Always consult the "Commands" section above.
 - **Do not break the build:** Run `npm run type-check` after *every* edit.
 - **Proactive Context:** Use `grep` and `glob` to verify variables, imports, and function signatures before making changes.
 - **Self-Correction:** If TypeScript throws an error, fix it immediately before proceeding to the next file.
+- **Respect legacy artifacts:** The `src/client/` directory and `public/splash.js` are legacy remnants of a removed webview feature. Do not reintroduce client-side webview code unless explicitly asked.

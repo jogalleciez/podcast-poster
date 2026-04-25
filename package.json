@@ -16,8 +16,8 @@
     "node": ">=22.6.0"
   },
   "dependencies": {
-    "@devvit/web": "0.12.18",
-    "devvit": "0.12.18",
+    "@devvit/web": "0.12.20",
+    "devvit": "0.12.20",
     "fast-xml-parser": "^5.4.1",
     "node-html-markdown": "^2.0.0"
   },

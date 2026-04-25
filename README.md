@@ -72,7 +72,7 @@ URL | Podcast Name | Link URL
 
 - **URL** (required) — The podcast RSS feed URL
 - **Podcast Name** (optional) — Custom name to override the RSS feed's `<title>`. If omitted, uses the feed's default title.
-- **Link URL** (optional) — URL for the "Listen to this episode" link. Generally intended for a splash page for the podcast. If omitted, falls back to the episode's audio URL.
+- **Link URL** (optional) — URL for the "Listen to this episode" link. Generally intended for a splash page for the podcast. If omitted, falls back to the episode's audio URL. If set to the special value `link`, uses the episode's landing page URL from the RSS feed.
 
 **Examples:**
 
