@@ -186,12 +186,7 @@ async function createEpisodePost(episode: EpisodeData): Promise<string> {
   const subreddit = await reddit.getCurrentSubreddit();
   const title = `${episode.podcastTitle} - ${episode.episodeTitle}`;
 
-  let resolvedLinkUrl: string;
-  if (episode.postLinkUrl === "link") {
-    resolvedLinkUrl = episode.linkUrl;
-  } else {
-    resolvedLinkUrl = episode.postLinkUrl || episode.audioUrl;
-  }
+  const resolvedLinkUrl = episode.postLinkUrl || episode.linkUrl || episode.audioUrl;
 
   let body = episode.description;
   if (resolvedLinkUrl) {
