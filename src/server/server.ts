@@ -175,7 +175,7 @@ async function fetchLatestEpisode(feed: FeedConfig): Promise<EpisodeData | null>
   const description = NodeHtmlMarkdown.translate(rawDescription).trim();
 
   const audioUrl: string = item.enclosure?.["@_url"] ?? item.link ?? "";
-  const linkUrl: string = item.link ?? "";
+  const linkUrl: string = item.link ?? channel.link ?? "";
 
   if (!guid || !episodeTitle) return null;
 
