@@ -7,3 +7,7 @@ public/*.js.map
 mcp.json
 .cursor/
 .vscode/
+
+# Source asset for the app icon — committed copy lives at assets/icon.png
+pod-poster.png
+pod-poster.icon

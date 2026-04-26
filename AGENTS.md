@@ -4,7 +4,7 @@ This document provides operational guidelines, commands, and code style rules fo
 
 ## Project Overview
 
-This is a Reddit Devvit application (v0.12.18) built with TypeScript and Node.js (v22.6.0+). The app automatically posts the latest episodes from one or more RSS podcast feeds to a subreddit as standard Reddit self-posts. Moderators configure feeds via app settings; the app polls RSS feeds on a schedule and creates text posts with the episode title, description (HTML converted to Markdown), and a listen link.
+This is a Reddit Devvit application (v0.12.20) built with TypeScript and Node.js (v22.6.0+). The app automatically posts the latest episodes from one or more RSS podcast feeds to a subreddit as standard Reddit self-posts. Moderators configure feeds via app settings; the app polls RSS feeds on a schedule and creates text posts with the episode title, description (HTML converted to Markdown), and a listen link.
 
 ### Directory Structure
 - `src/server/`: Backend execution context (HTTP request routing, RSS fetching, Reddit post creation, Redis state management). This is the only active source directory.
@@ -97,7 +97,7 @@ Always ensure the build and type-checks succeed before pushing code or creating 
 - **Defensive Data Limits:** Devvit imposes limits on payload sizes and post bodies. Truncate large strings like descriptions before submitting posts via `reddit.submitPost`.
 - **Redis Key Management:** When adding new state or caching, namespace Redis keys logically. If state is per-feed or per-entity, include a unique ID in the key.
   - Existing keys:
-    - `last_posted_guid:${feed.index}` — tracks the last posted episode GUID per feed.
+    - `last_posted_guid:url:${sha1(feed.url).slice(0,12)}` — tracks the last posted episode GUID per feed using a stable URL hash.
     - `pending_edit:${userId}` — stores the post ID during a body-edit flow (10-minute expiration).
     - `last_global_check_date` — stores `YYYY-MM-DD` to gate daily/weekly polling frequency.
   - Do not rely solely on global keys if a feature might scale to multiple entities.

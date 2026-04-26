@@ -15,6 +15,13 @@
         "endpoint": "/internal/menu/post-create"
       },
       {
+        "label": "Configure Podcast Poster",
+        "description": "Open App Settings to configure RSS feeds and posting options.",
+        "location": "subreddit",
+        "forUserType": "moderator",
+        "endpoint": "/internal/menu/open-settings"
+      },
+      {
         "label": "Edit post body",
         "description": "Edit the text body of this episode post.",
         "location": "post",
@@ -71,6 +78,9 @@
   },
   "dev": {
     "subreddit": "podcast_poster_dev"
+  },
+  "marketingAssets": {
+    "icon": "assets/icon.png"
   },
   "settings": {
     "subreddit": {

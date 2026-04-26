@@ -118,19 +118,18 @@ Need a different host? Open an [issue](https://github.com/jogalleciez/podcast-po
 
 | Component | Technology |
 |---|---|
-| Platform | [Devvit Web](https://developers.reddit.com/docs/capabilities/devvit-web/devvit_web_overview) v0.12.18 |
+| Platform | [Devvit Web](https://developers.reddit.com/docs/capabilities/devvit-web/devvit_web_overview) v0.12.20 |
 | Language | TypeScript 5.x / Node.js ≥ 22.6 |
 | RSS Parsing | [`fast-xml-parser`](https://github.com/NaturalIntelligence/fast-xml-parser) |
 | HTML → Markdown | [`node-html-markdown`](https://github.com/crosstype/node-html-markdown) |
 | Build | `esbuild` via `tools/build.ts` |
-| Storage | Devvit Redis — per-feed GUID tracking via `last_posted_guid:{index}` |
+| Storage | Devvit Redis — per-feed GUID tracking via `last_posted_guid:url:{sha1(url).slice(0,12)}` |
 
 ---
 
 ## Known Limitations
 
 - Only the **most recent** entry in the RSS feed is posted per check cycle.
-- Post descriptions are truncated to fit Devvit's ~2KB payload limit.
 - Only podcast hosts in the [supported hosts](#supported-rss-feed-hosts) table above are supported — Devvit requires all external domains to be [pre-approved](https://developers.reddit.com/docs/capabilities/server/http-fetch-policy). Hosts not on the list will fail silently at fetch time.
 
 ---
