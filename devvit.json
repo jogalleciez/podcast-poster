@@ -72,7 +72,10 @@
         "image.simplecastcdn.com",
         "api.spreaker.com",
         "cdn.atp.fm",
-        "podcasts.files.bbci.co.uk"
+        "podcasts.files.bbci.co.uk",
+        "feeds.megaphone.fm",
+        "traffic.megaphone.fm",
+        "api.audioboom.com"
       ]
     }
   },
@@ -161,6 +164,18 @@
           }
         ],
         "defaultValue": "0"
+      },
+      "includePodcastNameInTitle": {
+        "type": "boolean",
+        "label": "Include Podcast Name in Post Title",
+        "helpText": "When enabled (default), posts are titled 'Podcast Name - Episode Title'. When disabled, only the episode title is used.",
+        "defaultValue": true
+      },
+      "stickyPost": {
+        "type": "boolean",
+        "label": "Sticky (Highlight) New Episode Posts",
+        "helpText": "When enabled, each new episode post is automatically stickied to the top of the subreddit. Note: Reddit allows a maximum of 2 stickied posts at a time.",
+        "defaultValue": false
       }
     }
   }

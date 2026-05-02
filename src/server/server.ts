@@ -231,6 +231,10 @@ type SpreakerDetailResponse = {
   response: { episode: SpreakerEpisodeDetail };
 };
 
+type SpreakerShowDetailResponse = {
+  response: { show?: { title?: string } };
+};
+
 function extractSpreakerShowId(url: string): string | null {
   return url.match(/spreaker\.com\/show\/(\d+)/)?.[1] ?? null;
 }
@@ -282,6 +286,66 @@ async function fetchSpreakerEpisode(feed: FeedConfig): Promise<EpisodeData | nul
   return { guid, podcastTitle, episodeTitle, description, audioUrl, linkUrl, postLinkUrl: feed.postLinkUrl };
 }
 
+// ---------------------------------------------------------------------------
+// Audioboom (audioboom.com) — RSS lives on audioboom.com, which Devvit's
+// allowlist won't accept. Route through api.audioboom.com JSON API instead,
+// mirroring the Spreaker workaround.
+// ---------------------------------------------------------------------------
+
+type AudioboomClip = {
+  id?: number;
+  title?: string;
+  description?: string;
+  formatted_description?: string;
+  urls?: { high_mp3?: string; image?: string };
+  channel?: { title?: string };
+};
+
+type AudioboomClipsResponse = {
+  body?: { audio_clips?: AudioboomClip[] };
+};
+
+type AudioboomChannelResponse = {
+  body?: { channel?: { title?: string } };
+};
+
+function extractAudioboomChannelId(url: string): string | null {
+  return url.match(/audioboom\.com\/channels?\/(\d+)/)?.[1] ?? null;
+}
+
+const AUDIOBOOM_TTL_SECONDS = 50 * 60;
+
+async function fetchAudioboomEpisode(feed: FeedConfig): Promise<EpisodeData | null> {
+  const channelId = extractAudioboomChannelId(feed.url)!;
+
+  const clip = await cache(
+    async () => {
+      const resp = await fetch(
+        `https://api.audioboom.com/channels/${channelId}/audio_clips?limit=1`,
+        { headers: { "X-Fetch-Reason": "Fetching Audioboom episode data to post to Reddit" } },
+      );
+      if (!resp.ok) throw new Error(`Audioboom clips list failed: ${resp.status}`);
+      const data = (await resp.json()) as AudioboomClipsResponse;
+      return data.body?.audio_clips?.[0] ?? null;
+    },
+    { key: `audioboom_channel:${channelId}`, ttl: AUDIOBOOM_TTL_SECONDS },
+  );
+
+  if (!clip) return null;
+
+  const podcastTitle = feed.nameOverride || clip.channel?.title || "Podcast";
+  const guid = clip.id != null ? String(clip.id) : "";
+  const episodeTitle = clip.title ?? "Untitled Episode";
+  const rawDescription = clip.formatted_description || clip.description || "";
+  const description = NodeHtmlMarkdown.translate(rawDescription).trim();
+  const audioUrl = clip.urls?.high_mp3 ?? "";
+  const linkUrl = clip.id != null ? `https://audioboom.com/posts/${clip.id}` : "";
+
+  if (!guid) return null;
+
+  return { guid, podcastTitle, episodeTitle, description, audioUrl, linkUrl, postLinkUrl: feed.postLinkUrl };
+}
+
 // Narrow types for the subset of RSS / Atom fields we actually consume.
 // fast-xml-parser returns a loose object shape; we treat it as `unknown` and
 // pluck only the fields we rely on.
@@ -317,6 +381,9 @@ function readGuid(g: RssGuid | undefined): string {
 async function fetchLatestEpisode(feed: FeedConfig): Promise<EpisodeData | null> {
   if (extractSpreakerShowId(feed.url)) {
     return fetchSpreakerEpisode(feed);
+  }
+  if (extractAudioboomChannelId(feed.url)) {
+    return fetchAudioboomEpisode(feed);
   }
 
   const response = await fetch(feed.url, {
@@ -364,13 +431,73 @@ async function fetchLatestEpisode(feed: FeedConfig): Promise<EpisodeData | null>
   return { guid, podcastTitle, episodeTitle, description, audioUrl, linkUrl, postLinkUrl: feed.postLinkUrl };
 }
 
+async function fetchFeedTitle(feed: FeedConfig): Promise<string> {
+  if (feed.nameOverride) return feed.nameOverride;
+
+  try {
+    const showId = extractSpreakerShowId(feed.url);
+    if (showId) {
+      const title = await cache(
+        async () => {
+          const resp = await fetch(`https://api.spreaker.com/v2/shows/${showId}`, {
+            headers: { "X-Fetch-Reason": "Fetching Spreaker show title for feed selector" },
+          });
+          if (!resp.ok) return null;
+          const data = (await resp.json()) as SpreakerShowDetailResponse;
+          return data.response?.show?.title ?? null;
+        },
+        { key: `spreaker_show_title:${showId}`, ttl: SPREAKER_TTL_SECONDS },
+      );
+      return title ?? `Feed ${feed.index}`;
+    }
+
+    const audioboomChannelId = extractAudioboomChannelId(feed.url);
+    if (audioboomChannelId) {
+      const title = await cache(
+        async () => {
+          const resp = await fetch(`https://api.audioboom.com/channels/${audioboomChannelId}`, {
+            headers: { "X-Fetch-Reason": "Fetching Audioboom channel title for feed selector" },
+          });
+          if (!resp.ok) return null;
+          const data = (await resp.json()) as AudioboomChannelResponse;
+          return data.body?.channel?.title ?? null;
+        },
+        { key: `audioboom_channel_title:${audioboomChannelId}`, ttl: AUDIOBOOM_TTL_SECONDS },
+      );
+      return title ?? `Feed ${feed.index}`;
+    }
+
+    const response = await fetch(feed.url, {
+      headers: { "X-Fetch-Reason": "Fetching RSS channel title for feed selector" },
+    });
+    if (!response.ok) return `Feed ${feed.index}`;
+    const xmlData = await response.text();
+    const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
+    const result = parser.parse(xmlData) as RssDocument;
+    const channel = result.rss?.channel ?? result.feed;
+    return channel?.title || `Feed ${feed.index}`;
+  } catch {
+    return `Feed ${feed.index}`;
+  }
+}
+
 async function createEpisodePost(episode: EpisodeData): Promise<string> {
   const subredditName = context.subredditName;
   if (!subredditName) {
     throw new Error("subredditName missing from context");
   }
 
-  const title = `${episode.podcastTitle} - ${episode.episodeTitle}`;
+  const [flairIdRaw, flairTextRaw, includePodcastName, shouldSticky] = await Promise.all([
+    settings.get<string>("postFlairId"),
+    settings.get<string>("postFlairText"),
+    settings.get<boolean>("includePodcastNameInTitle"),
+    settings.get<boolean>("stickyPost"),
+  ]);
+
+  const title = includePodcastName !== false
+    ? `${episode.podcastTitle} - ${episode.episodeTitle}`
+    : episode.episodeTitle;
+
   const resolvedLinkUrl = episode.postLinkUrl || episode.linkUrl || episode.audioUrl;
 
   let body = episode.description;
@@ -386,10 +513,6 @@ async function createEpisodePost(episode: EpisodeData): Promise<string> {
     `[Add this to your subreddit](https://developers.reddit.com/apps/podcast-poster) ` +
     `or [request mods use it](${requestUrl}).*`;
 
-  const [flairIdRaw, flairTextRaw] = await Promise.all([
-    settings.get<string>("postFlairId"),
-    settings.get<string>("postFlairText"),
-  ]);
   const flairId = flairIdRaw?.trim() || undefined;
   const flairText = flairTextRaw?.trim() || undefined;
 
@@ -401,6 +524,15 @@ async function createEpisodePost(episode: EpisodeData): Promise<string> {
   });
 
   console.log(`New post created: ${post.url}`);
+
+  if (shouldSticky) {
+    try {
+      await post.sticky(1);
+    } catch (e) {
+      console.error("Failed to sticky post (subreddit may already have 2 stickies):", e);
+    }
+  }
+
   return post.url;
 }
 
@@ -556,6 +688,8 @@ async function onMenuPostLatest(): Promise<UiResponse> {
     return postFromFeeds(feeds);
   }
 
+  const feedLabels = await Promise.all(feeds.map(fetchFeedTitle));
+
   return {
     showForm: {
       name: "selectFeedForm",
@@ -569,8 +703,8 @@ async function onMenuPostLatest(): Promise<UiResponse> {
             required: true,
             options: [
               { label: "All Feeds", value: "all" },
-              ...feeds.map(f => ({
-                label: f.nameOverride || f.url,
+              ...feeds.map((f, i) => ({
+                label: feedLabels[i] ?? f.url,
                 value: String(f.index),
               })),
             ],
