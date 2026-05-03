@@ -1,6 +1,6 @@
 # Pod Poster
 
-A [Devvit](https://developers.reddit.com) app that automatically creates Reddit posts for new podcast episodes from an RSS feed. When a new episode is detected, it creates a self-post with the episode title and description — no manual posting required.
+A [Devvit](https://developers.reddit.com) app that automatically creates Reddit posts for new podcast episodes from an RSS feed. When a new episode is detected, it creates a custom-UI post (rendered by a small React client) with the episode title, podcast name, description, and a "Listen" button — no manual posting required.
 
 ---
 
@@ -120,10 +120,11 @@ Need a different host? Open an [issue](https://github.com/jogalleciez/podcast-po
 |---|---|
 | Platform | [Devvit Web](https://developers.reddit.com/docs/capabilities/devvit-web/devvit_web_overview) v0.12.20 |
 | Language | TypeScript 5.x / Node.js ≥ 22.6 |
+| Frontend | React 19 + `react-markdown` (episode card UI) |
 | RSS Parsing | [`fast-xml-parser`](https://github.com/NaturalIntelligence/fast-xml-parser) |
 | HTML → Markdown | [`node-html-markdown`](https://github.com/crosstype/node-html-markdown) |
-| Build | `esbuild` via `tools/build.ts` |
-| Storage | Devvit Redis — per-feed GUID tracking via `last_posted_guid:url:{sha1(url).slice(0,12)}` |
+| Build | `esbuild` via `tools/build.ts` (server + client bundles) |
+| Storage | Devvit Redis — per-feed GUID tracking via `last_posted_guid:url:{sha1(url).slice(0,12)}`, episode data via `post_data:{postId}` |
 
 ---
 
@@ -131,6 +132,7 @@ Need a different host? Open an [issue](https://github.com/jogalleciez/podcast-po
 
 - Only the **most recent** entry in the RSS feed is posted per check cycle.
 - Only podcast hosts in the [supported hosts](#supported-rss-feed-hosts) table above are supported — Devvit requires all external domains to be [pre-approved](https://developers.reddit.com/docs/capabilities/server/http-fetch-policy). Hosts not on the list will fail silently at fetch time.
+- **Legacy posts** created before the React UI was introduced will continue to render as plain Reddit text posts. Reddit does not allow changing a post's type after creation, so only posts created from this version onward will display the custom episode card.
 
 ---
 

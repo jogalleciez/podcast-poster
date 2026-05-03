@@ -1,6 +1,14 @@
 {
   "$schema": "https://developers.reddit.com/schema/config-file.v1.json",
   "name": "podcast-poster",
+  "post": {
+    "dir": "dist/client",
+    "entrypoints": {
+      "default": { "entry": "index.html", "inline": true },
+      "desktop": { "entry": "index.html" },
+      "mobile": { "entry": "index.html" }
+    }
+  },
   "server": {
     "dir": "dist/server",
     "entry": "index.js"
@@ -27,12 +35,20 @@
         "location": "post",
         "forUserType": "moderator",
         "endpoint": "/internal/menu/edit-post-body"
+      },
+      {
+        "label": "View client errors (debug)",
+        "description": "Show recent client-side errors captured from the WebView.",
+        "location": "subreddit",
+        "forUserType": "moderator",
+        "endpoint": "/internal/menu/view-client-errors"
       }
     ]
   },
   "forms": {
     "editPostBodyForm": "/internal/form/edit-post-body-submit",
-    "selectFeedForm": "/internal/form/select-feed-submit"
+    "selectFeedForm": "/internal/form/select-feed-submit",
+    "viewClientErrorsForm": "/internal/form/view-client-errors-submit"
   },
   "triggers": {
     "onAppInstall": "/internal/on-app-install"
@@ -75,7 +91,14 @@
         "podcasts.files.bbci.co.uk",
         "feeds.megaphone.fm",
         "traffic.megaphone.fm",
-        "api.audioboom.com"
+        "api.audioboom.com",
+        "dts.podtrac.com",
+        "f.prxu.org",
+        "play.prx.org",
+        "npr.brightspotcdn.com",
+        "content.production.cdn.art19.com",
+        "megaphone.imgix.net",
+        "afp-9384.calisto.simplecastaudio.com"
       ]
     }
   },
@@ -176,6 +199,22 @@
         "label": "Sticky (Highlight) New Episode Posts",
         "helpText": "When enabled, each new episode post is automatically stickied to the top of the subreddit. Note: Reddit allows a maximum of 2 stickied posts at a time.",
         "defaultValue": false
+      },
+      "listenButtonColor": {
+        "type": "string",
+        "label": "Listen Button Color",
+        "helpText": "Optional CSS color for the Listen button (e.g. #ff5733 or coral). Leave blank to use the default Reddit blue.",
+        "defaultValue": ""
+      },
+      "listenButtonPosition": {
+        "type": "select",
+        "label": "Listen Button Position",
+        "helpText": "Where to show the Listen button relative to the episode description.",
+        "options": [
+          { "label": "Bottom — below the description (default)", "value": "bottom" },
+          { "label": "Top — above the description", "value": "top" }
+        ],
+        "defaultValue": "bottom"
       }
     }
   }

@@ -7,7 +7,8 @@
 // --watch     Automatically rebuild whenever an input changes.
 
 import fs from "node:fs";
-import type { BuildOptions } from "esbuild";
+import path from "node:path";
+import type { BuildOptions, Plugin } from "esbuild";
 import esbuild from "esbuild";
 
 const watch = process.argv.includes("--watch");
@@ -30,11 +31,43 @@ const serverOpts: BuildOptions = {
   platform: "node",
 };
 
+const clientStaticFiles = ["src/client/index.html", "src/client/styles.css"];
+
+const copyStaticPlugin: Plugin = {
+  name: "copy-static",
+  setup(build) {
+    build.onEnd(() => {
+      const outdir = build.initialOptions.outdir ?? "dist/client";
+      fs.mkdirSync(outdir, { recursive: true });
+      for (const src of clientStaticFiles) {
+        const dest = path.join(outdir, path.basename(src));
+        fs.copyFileSync(src, dest);
+      }
+    });
+  },
+};
+
+const clientOpts: BuildOptions = {
+  ...opts,
+  entryPoints: ["src/client/index.tsx"],
+  format: "esm",
+  outdir: "dist/client",
+  platform: "browser",
+  jsx: "automatic",
+  plugins: [copyStaticPlugin],
+};
+
 if (watch) {
   const serverCtx = await esbuild.context(serverOpts);
-  await serverCtx.watch();
+  const clientCtx = await esbuild.context(clientOpts);
+  await Promise.all([serverCtx.watch(), clientCtx.watch()]);
 } else {
-  const server = await esbuild.build(serverOpts);
+  const [server, client] = await Promise.all([
+    esbuild.build(serverOpts),
+    esbuild.build(clientOpts),
+  ]);
   if (server.metafile)
     fs.writeFileSync("dist/server.meta.json", JSON.stringify(server.metafile));
+  if (client.metafile)
+    fs.writeFileSync("dist/client.meta.json", JSON.stringify(client.metafile));
 }

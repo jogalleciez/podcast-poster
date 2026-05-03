@@ -8,24 +8,10 @@ import type {
   TriggerResponse,
   UiResponse,
 } from "@devvit/web/shared";
-import { ApiEndpoint } from "../shared/api.ts";
+import { ApiEndpoint, type ClientErrorReport, type DisplaySettings, type EpisodeData, type FundingLink, type Person, type PostDataResponse, type Soundbite } from "../shared/api.ts";
 import { XMLParser } from "fast-xml-parser";
 
 import { NodeHtmlMarkdown } from "node-html-markdown";
-
-// ---------------------------------------------------------------------------
-// Bot footer
-// ---------------------------------------------------------------------------
-
-const BOT_REQUEST_SUBJECT = encodeURIComponent("Thought this might be handy");
-const BOT_REQUEST_MESSAGE = encodeURIComponent(
-  "Hey mods!\n\n" +
-  "One of my favorite things about podcast subreddits is having a place to discuss the latest episodes and dig into the details. " +
-  "I came across a free Devvit app called Pod Poster that automatically creates a post whenever a new episode drops — " +
-  "it can help create discussion posts automatically and offload moderator or individual posting responsibilities.\n\n" +
-  "Check it out here: https://developers.reddit.com/apps/podcast-poster\n\n" +
-  "Please consider adding it!"
-);
 
 // ---------------------------------------------------------------------------
 // HTTP entry point
@@ -57,7 +43,8 @@ async function onRequest(
 
   const endpoint = url as ApiEndpoint;
 
-  let body: UiResponse | TaskResponse | TriggerResponse | ErrorResponse;
+  let body: UiResponse | TaskResponse | TriggerResponse | PostDataResponse | { ok: true } | { entries: string } | ErrorResponse;
+  let status = 200;
   switch (endpoint) {
     case ApiEndpoint.OnPostCreate:
       body = await onMenuPostLatest();
@@ -80,13 +67,30 @@ async function onRequest(
     case ApiEndpoint.OnAppInstall:
       body = await onAppInstall();
       break;
+    case ApiEndpoint.PostData:
+      body = await onGetPostData();
+      if ("error" in body) status = 404;
+      break;
+    case ApiEndpoint.LogClientError:
+      body = await onLogClientError(req);
+      break;
+    case ApiEndpoint.ListClientErrors:
+      body = await onListClientErrors();
+      break;
+    case ApiEndpoint.ViewClientErrorsMenu:
+      body = await onMenuViewClientErrors();
+      break;
+    case ApiEndpoint.ViewClientErrorsSubmit:
+      body = { showToast: { text: "Closed.", appearance: "neutral" } };
+      break;
     default:
       endpoint satisfies never;
       body = { error: "not found", status: 404 };
       break;
   }
 
-  writeJSON<PartialJsonValue>("error" in body ? (body as ErrorResponse).status : 200, body, rsp);
+  if ("error" in body && "status" in body) status = (body as ErrorResponse).status;
+  writeJSON<PartialJsonValue>(status, body, rsp);
 }
 
 type ErrorResponse = {
@@ -102,16 +106,6 @@ type FeedConfig = {
   index: number;        // 1-based position in the feedUrls setting
   url: string;
   nameOverride: string; // may be empty — fall back to RSS <title>
-  postLinkUrl?: string;
-};
-
-type EpisodeData = {
-  guid: string;
-  podcastTitle: string;  // resolved: nameOverride ?? RSS title
-  episodeTitle: string;
-  description: string;
-  audioUrl: string;
-  linkUrl: string;
   postLinkUrl?: string;
 };
 
@@ -224,7 +218,14 @@ type SpreakerEpisodeDetail = {
   playback_url?: string;
   media_url?: string;
   site_url?: string;
-  show?: { title?: string };
+  duration?: number;
+  published_at?: string;
+  show?: {
+    title?: string;
+    image_url?: string;
+    description?: string;
+    catchphrase?: string;
+  };
 };
 
 type SpreakerDetailResponse = {
@@ -282,8 +283,16 @@ async function fetchSpreakerEpisode(feed: FeedConfig): Promise<EpisodeData | nul
   const description = NodeHtmlMarkdown.translate(rawDescription).trim();
   const audioUrl = ep.download_url || ep.playback_url || ep.media_url || "";
   const linkUrl = ep.site_url || "";
+  const podcastArtworkUrl = ep.show?.image_url || undefined;
+  const podcastTagline = ep.show?.catchphrase || undefined;
+  const rawShowDesc = ep.show?.description || "";
+  const podcastDescription = rawShowDesc
+    ? NodeHtmlMarkdown.translate(rawShowDesc).trim() || undefined
+    : undefined;
+  const pubDate = ep.published_at ? new Date(ep.published_at).toISOString() : undefined;
+  const durationSecs = parseDurationSecs(ep.duration);
 
-  return { guid, podcastTitle, episodeTitle, description, audioUrl, linkUrl, postLinkUrl: feed.postLinkUrl };
+  return { guid, podcastTitle, episodeTitle, description, audioUrl, linkUrl, postLinkUrl: feed.postLinkUrl, podcastArtworkUrl, podcastTagline, podcastDescription, pubDate, durationSecs };
 }
 
 // ---------------------------------------------------------------------------
@@ -297,6 +306,8 @@ type AudioboomClip = {
   title?: string;
   description?: string;
   formatted_description?: string;
+  duration?: number;
+  uploaded_at?: string;
   urls?: { high_mp3?: string; image?: string };
   channel?: { title?: string };
 };
@@ -305,8 +316,14 @@ type AudioboomClipsResponse = {
   body?: { audio_clips?: AudioboomClip[] };
 };
 
+type AudioboomChannelDetail = {
+  title?: string;
+  description?: string;
+  urls?: { logo_image?: { original?: string } };
+};
+
 type AudioboomChannelResponse = {
-  body?: { channel?: { title?: string } };
+  body?: { channel?: AudioboomChannelDetail };
 };
 
 function extractAudioboomChannelId(url: string): string | null {
@@ -317,33 +334,55 @@ const AUDIOBOOM_TTL_SECONDS = 50 * 60;
 
 async function fetchAudioboomEpisode(feed: FeedConfig): Promise<EpisodeData | null> {
   const channelId = extractAudioboomChannelId(feed.url)!;
+  const fetchOpts = { headers: { "X-Fetch-Reason": "Fetching Audioboom episode data to post to Reddit" } };
 
-  const clip = await cache(
-    async () => {
-      const resp = await fetch(
-        `https://api.audioboom.com/channels/${channelId}/audio_clips?limit=1`,
-        { headers: { "X-Fetch-Reason": "Fetching Audioboom episode data to post to Reddit" } },
-      );
-      if (!resp.ok) throw new Error(`Audioboom clips list failed: ${resp.status}`);
-      const data = (await resp.json()) as AudioboomClipsResponse;
-      return data.body?.audio_clips?.[0] ?? null;
-    },
-    { key: `audioboom_channel:${channelId}`, ttl: AUDIOBOOM_TTL_SECONDS },
-  );
+  const [clip, channelDetail] = await Promise.all([
+    cache(
+      async () => {
+        const resp = await fetch(
+          `https://api.audioboom.com/channels/${channelId}/audio_clips?limit=1`,
+          fetchOpts,
+        );
+        if (!resp.ok) throw new Error(`Audioboom clips list failed: ${resp.status}`);
+        const data = (await resp.json()) as AudioboomClipsResponse;
+        return data.body?.audio_clips?.[0] ?? null;
+      },
+      { key: `audioboom_channel:${channelId}`, ttl: AUDIOBOOM_TTL_SECONDS },
+    ),
+    cache(
+      async () => {
+        const resp = await fetch(
+          `https://api.audioboom.com/channels/${channelId}`,
+          fetchOpts,
+        );
+        if (!resp.ok) return null;
+        const data = (await resp.json()) as AudioboomChannelResponse;
+        return data.body?.channel ?? null;
+      },
+      { key: `audioboom_channel_meta:${channelId}`, ttl: AUDIOBOOM_TTL_SECONDS },
+    ),
+  ]);
 
   if (!clip) return null;
 
-  const podcastTitle = feed.nameOverride || clip.channel?.title || "Podcast";
+  const podcastTitle = feed.nameOverride || clip.channel?.title || channelDetail?.title || "Podcast";
   const guid = clip.id != null ? String(clip.id) : "";
   const episodeTitle = clip.title ?? "Untitled Episode";
   const rawDescription = clip.formatted_description || clip.description || "";
   const description = NodeHtmlMarkdown.translate(rawDescription).trim();
   const audioUrl = clip.urls?.high_mp3 ?? "";
   const linkUrl = clip.id != null ? `https://audioboom.com/posts/${clip.id}` : "";
+  const podcastArtworkUrl = channelDetail?.urls?.logo_image?.original || undefined;
+  const rawShowDesc = channelDetail?.description || "";
+  const podcastDescription = rawShowDesc
+    ? NodeHtmlMarkdown.translate(rawShowDesc).trim() || undefined
+    : undefined;
+  const pubDate = clip.uploaded_at ? new Date(clip.uploaded_at).toISOString() : undefined;
+  const durationSecs = parseDurationSecs(clip.duration);
 
   if (!guid) return null;
 
-  return { guid, podcastTitle, episodeTitle, description, audioUrl, linkUrl, postLinkUrl: feed.postLinkUrl };
+  return { guid, podcastTitle, episodeTitle, description, audioUrl, linkUrl, postLinkUrl: feed.postLinkUrl, podcastArtworkUrl, podcastDescription, pubDate, durationSecs };
 }
 
 // Narrow types for the subset of RSS / Atom fields we actually consume.
@@ -351,6 +390,15 @@ async function fetchAudioboomEpisode(feed: FeedConfig): Promise<EpisodeData | nu
 // pluck only the fields we rely on.
 type RssEnclosure = { "@_url"?: string };
 type RssGuid = string | { "#text"?: string };
+type PodcastTranscript = { "@_url"?: string; "@_type"?: string };
+type PodcastPerson = { "#text"?: string; "@_role"?: string; "@_group"?: string; "@_href"?: string };
+type PodcastChapters = { "@_url"?: string };
+type PodcastFunding = { "#text"?: string; "@_url"?: string };
+type PodcastSoundbite = { "#text"?: string; "@_startTime"?: string; "@_duration"?: string };
+// fast-xml-parser emits a plain number/string when no attributes are present,
+// or { "#text": number|string, "@_...": string } when attributes are present.
+type PodcastSeasonVal = number | string | { "#text"?: number | string; "@_name"?: string };
+type PodcastEpisodeVal = number | string | { "#text"?: number | string; "@_display"?: string };
 type RssItem = {
   guid?: RssGuid;
   id?: string;
@@ -360,13 +408,153 @@ type RssItem = {
   content?: string;
   enclosure?: RssEnclosure;
   "itunes:summary"?: string;
+  "itunes:subtitle"?: string;
+  "itunes:keywords"?: string;
+  "itunes:episodeType"?: string;
   "content:encoded"?: string;
+  pubDate?: string;
+  "itunes:duration"?: string | number;
+  "itunes:episode"?: number | string;
+  "itunes:season"?: number | string;
+  "itunes:explicit"?: string | boolean;
+  "itunes:author"?: string;
+  "podcast:transcript"?: PodcastTranscript | PodcastTranscript[];
+  "podcast:person"?: PodcastPerson | PodcastPerson[];
+  "podcast:chapters"?: PodcastChapters | PodcastChapters[];
+  "podcast:soundbite"?: PodcastSoundbite | PodcastSoundbite[];
+  "podcast:season"?: PodcastSeasonVal;
+  "podcast:episode"?: PodcastEpisodeVal;
 };
 type RssChannel = {
   title?: string;
+  description?: string;
+  "content:encoded"?: string;
+  "itunes:subtitle"?: string;
+  "itunes:summary"?: string;
+  "itunes:keywords"?: string;
+  "itunes:image"?: { "@_href"?: string } | string;
+  image?: { url?: string };
   item?: RssItem | RssItem[];
   entry?: RssItem | RssItem[];
+  "itunes:explicit"?: string | boolean;
+  "itunes:author"?: string;
+  "podcast:funding"?: PodcastFunding | PodcastFunding[];
+  "podcast:person"?: PodcastPerson | PodcastPerson[];
 };
+
+function parseDurationSecs(val: string | number | undefined): number | undefined {
+  if (val == null) return undefined;
+  if (typeof val === "number") return val > 0 ? Math.round(val) : undefined;
+  const parts = String(val).split(":").map(Number);
+  if (parts.some(isNaN)) return undefined;
+  if (parts.length === 3) return parts[0]! * 3600 + parts[1]! * 60 + parts[2]!;
+  if (parts.length === 2) return parts[0]! * 60 + parts[1]!;
+  return Math.round(Number(val)) || undefined;
+}
+
+function parseExplicit(val: string | boolean | undefined): boolean | undefined {
+  if (val == null) return undefined;
+  if (typeof val === "boolean") return val;
+  if (!val) return undefined;
+  const v = val.toLowerCase();
+  if (v === "yes" || v === "true") return true;
+  if (v === "no" || v === "false" || v === "clean") return false;
+  return undefined;
+}
+
+function firstTranscriptUrl(t: PodcastTranscript | PodcastTranscript[] | undefined): string | undefined {
+  if (!t) return undefined;
+  const first = Array.isArray(t) ? t[0] : t;
+  return first?.["@_url"] || undefined;
+}
+
+function readItunesImage(val: { "@_href"?: string } | string | undefined): string | undefined {
+  if (!val) return undefined;
+  if (typeof val === "string") return val || undefined;
+  return val["@_href"] || undefined;
+}
+
+function extractPeople(
+  itemVal: PodcastPerson | PodcastPerson[] | undefined,
+  channelVal: PodcastPerson | PodcastPerson[] | undefined,
+): Person[] | undefined {
+  const raw = itemVal ?? channelVal;
+  if (!raw) return undefined;
+  const arr = Array.isArray(raw) ? raw : [raw];
+  const people = arr
+    .filter(p => !!p["#text"] && (!p["@_group"] || p["@_group"].toLowerCase() === "cast"))
+    .map(p => ({
+      name: (p["#text"] as string).trim(),
+      role: p["@_role"]?.toLowerCase() || undefined,
+      href: p["@_href"] || undefined,
+    }));
+  return people.length > 0 ? people : undefined;
+}
+
+function firstChaptersUrl(val: PodcastChapters | PodcastChapters[] | undefined): string | undefined {
+  if (!val) return undefined;
+  const first = Array.isArray(val) ? val[0] : val;
+  return first?.["@_url"] || undefined;
+}
+
+function extractFunding(val: PodcastFunding | PodcastFunding[] | undefined): FundingLink[] | undefined {
+  if (!val) return undefined;
+  const arr = Array.isArray(val) ? val : [val];
+  const seen = new Set<string>();
+  const links: FundingLink[] = [];
+  for (const f of arr) {
+    const url = f["@_url"];
+    if (url && !seen.has(url)) {
+      seen.add(url);
+      links.push({ label: (f["#text"] ?? "Support the show").trim() || "Support the show", url });
+    }
+  }
+  return links.length > 0 ? links : undefined;
+}
+
+function extractSoundbites(val: PodcastSoundbite | PodcastSoundbite[] | undefined): Soundbite[] | undefined {
+  if (!val) return undefined;
+  const arr = Array.isArray(val) ? val : [val];
+  const bites: Soundbite[] = [];
+  for (const s of arr) {
+    const start = parseFloat(s["@_startTime"] ?? "");
+    const dur = parseFloat(s["@_duration"] ?? "");
+    if (!isNaN(start) && !isNaN(dur)) {
+      bites.push({ title: s["#text"]?.trim() || undefined, startTimeSecs: start, durationSecs: dur });
+    }
+  }
+  return bites.length > 0 ? bites : undefined;
+}
+
+function readPodcastSeasonVal(val: PodcastSeasonVal | undefined): { number?: number; name?: string } {
+  if (val == null) return {};
+  if (typeof val === "number") return { number: val > 0 ? Math.round(val) : undefined };
+  if (typeof val === "string") {
+    const n = Number(val.trim());
+    return { number: !isNaN(n) && n > 0 ? Math.round(n) : undefined };
+  }
+  const text = val["#text"];
+  const n = text != null ? Number(text) : NaN;
+  return {
+    number: !isNaN(n) && n > 0 ? Math.round(n) : undefined,
+    name: val["@_name"]?.trim() || undefined,
+  };
+}
+
+function readPodcastEpisodeVal(val: PodcastEpisodeVal | undefined): { number?: number; display?: string } {
+  if (val == null) return {};
+  if (typeof val === "number") return { number: val > 0 ? Math.round(val) : undefined };
+  if (typeof val === "string") {
+    const n = Number(val.trim());
+    return { number: !isNaN(n) && n > 0 ? Math.round(n) : undefined };
+  }
+  const text = val["#text"];
+  const n = text != null ? Number(text) : NaN;
+  return {
+    number: !isNaN(n) && n > 0 ? Math.round(n) : undefined,
+    display: val["@_display"]?.trim() || undefined,
+  };
+}
 type RssDocument = {
   rss?: { channel?: RssChannel };
   feed?: RssChannel;
@@ -389,6 +577,7 @@ async function fetchLatestEpisode(feed: FeedConfig): Promise<EpisodeData | null>
   const response = await fetch(feed.url, {
     headers: {
       "X-Fetch-Reason": "Fetching RSS feed to check for new podcast episodes to post to Reddit",
+      "Accept-Encoding": "identity",
     },
   });
   if (!response.ok) {
@@ -403,6 +592,12 @@ async function fetchLatestEpisode(feed: FeedConfig): Promise<EpisodeData | null>
   if (!channel) return null;
 
   const podcastTitle = feed.nameOverride || channel.title || "Podcast";
+  const podcastArtworkUrl = readItunesImage(channel["itunes:image"]) ?? channel.image?.url;
+  const podcastTagline = channel["itunes:subtitle"] || undefined;
+  const rawShowDesc = channel["content:encoded"] ?? channel.description ?? channel["itunes:summary"] ?? "";
+  const podcastDescription = rawShowDesc
+    ? stripPrivacyNotices(NodeHtmlMarkdown.translate(rawShowDesc).trim()) || undefined
+    : undefined;
 
   const rawItems = channel.item ?? channel.entry;
   if (!rawItems) return null;
@@ -414,21 +609,54 @@ async function fetchLatestEpisode(feed: FeedConfig): Promise<EpisodeData | null>
   const guid = readGuid(item.guid) || item.id || item.link || "";
   const episodeTitle = item.title ?? "Untitled Episode";
   const rawDescription =
+    item["content:encoded"] ??
+    item.content ??
     item.description ??
     item["itunes:summary"] ??
-    item.content ??
-    item["content:encoded"] ??
+    item["itunes:subtitle"] ??
     "";
 
-  // Convert HTML to Markdown for plain-text body
   const description = stripPrivacyNotices(NodeHtmlMarkdown.translate(rawDescription).trim());
+
+  const episodeSubtitle = item["itunes:subtitle"]
+    ? stripPrivacyNotices(NodeHtmlMarkdown.translate(item["itunes:subtitle"]).trim()) || undefined
+    : undefined;
+
+  const rawKeywords = item["itunes:keywords"] || channel["itunes:keywords"];
+  const keywords = rawKeywords
+    ? rawKeywords.split(",").map(k => k.trim()).filter(Boolean)
+    : undefined;
+
+  const episodeTypeRaw = item["itunes:episodeType"]?.toLowerCase();
+  const episodeType =
+    episodeTypeRaw === "full" || episodeTypeRaw === "trailer" || episodeTypeRaw === "bonus"
+      ? episodeTypeRaw
+      : undefined;
 
   const audioUrl = item.enclosure?.["@_url"] ?? item.link ?? "";
   const linkUrl = item.link ?? "";
+  const pubDate = item.pubDate ? new Date(item.pubDate).toISOString() : undefined;
+  const durationSecs = parseDurationSecs(item["itunes:duration"]);
+  const explicit = parseExplicit(item["itunes:explicit"] ?? channel["itunes:explicit"]);
+  const episodeAuthor = item["itunes:author"] || channel["itunes:author"] || undefined;
+  const transcriptUrl = firstTranscriptUrl(item["podcast:transcript"]);
+
+  const podcastEp = readPodcastEpisodeVal(item["podcast:episode"]);
+  const podcastSeason = readPodcastSeasonVal(item["podcast:season"]);
+  // Prefer itunes: numbers (broader compat); fall back to podcast: if absent.
+  const episodeNumber = item["itunes:episode"] != null ? Number(item["itunes:episode"]) : podcastEp.number;
+  const seasonNumber  = item["itunes:season"]  != null ? Number(item["itunes:season"])  : podcastSeason.number;
+  const episodeDisplay = podcastEp.display;
+  const seasonName = podcastSeason.name;
+
+  const people = extractPeople(item["podcast:person"], channel["podcast:person"]);
+  const chaptersUrl = firstChaptersUrl(item["podcast:chapters"]);
+  const fundingLinks = extractFunding(channel["podcast:funding"]);
+  const soundbites = extractSoundbites(item["podcast:soundbite"]);
 
   if (!guid || !episodeTitle) return null;
 
-  return { guid, podcastTitle, episodeTitle, description, audioUrl, linkUrl, postLinkUrl: feed.postLinkUrl };
+  return { guid, podcastTitle, episodeTitle, description, audioUrl, linkUrl, postLinkUrl: feed.postLinkUrl, podcastArtworkUrl, podcastTagline, podcastDescription, pubDate, durationSecs, episodeNumber, seasonNumber, explicit, episodeAuthor, transcriptUrl, episodeSubtitle, keywords, episodeType, people, chaptersUrl, fundingLinks, seasonName, episodeDisplay, soundbites };
 }
 
 async function fetchFeedTitle(feed: FeedConfig): Promise<string> {
@@ -468,7 +696,10 @@ async function fetchFeedTitle(feed: FeedConfig): Promise<string> {
     }
 
     const response = await fetch(feed.url, {
-      headers: { "X-Fetch-Reason": "Fetching RSS channel title for feed selector" },
+      headers: {
+        "X-Fetch-Reason": "Fetching RSS channel title for feed selector",
+        "Accept-Encoding": "identity",
+      },
     });
     if (!response.ok) return `Feed ${feed.index}`;
     const xmlData = await response.text();
@@ -479,6 +710,10 @@ async function fetchFeedTitle(feed: FeedConfig): Promise<string> {
   } catch {
     return `Feed ${feed.index}`;
   }
+}
+
+function postDataKey(postId: string): string {
+  return `post_data:${postId}`;
 }
 
 async function createEpisodePost(episode: EpisodeData): Promise<string> {
@@ -498,30 +733,16 @@ async function createEpisodePost(episode: EpisodeData): Promise<string> {
     ? `${episode.podcastTitle} - ${episode.episodeTitle}`
     : episode.episodeTitle;
 
-  const resolvedLinkUrl = episode.postLinkUrl || episode.linkUrl || episode.audioUrl;
-
-  let body = episode.description;
-  if (resolvedLinkUrl) {
-    body += `\n\n# [Listen to this episode](${resolvedLinkUrl})`;
-  }
-
-  const requestUrl =
-    `https://www.reddit.com/message/compose?to=r/` +
-    `&subject=${BOT_REQUEST_SUBJECT}&message=${BOT_REQUEST_MESSAGE}`;
-  body +=
-    `\n\n---\n*This is a bot that posts new episodes automatically. ` +
-    `[Add this to your subreddit](https://developers.reddit.com/apps/podcast-poster) ` +
-    `or [request mods use it](${requestUrl}).*`;
-
   const flairId = flairIdRaw?.trim() || undefined;
   const flairText = flairTextRaw?.trim() || undefined;
 
-  const post = await reddit.submitPost({
+  const post = await reddit.submitCustomPost({
     subredditName,
     title,
-    text: body,
     ...(flairId ? { flairId, flairText } : {}),
   });
+
+  await redis.set(postDataKey(post.id), JSON.stringify(episode));
 
   console.log(`New post created: ${post.url}`);
 
@@ -556,9 +777,18 @@ async function onMenuOpenSettings(): Promise<UiResponse> {
  */
 async function onMenuEditPostBody(req: IncomingMessage): Promise<UiResponse> {
   const { targetId } = await readBody<MenuItemRequest>(req);
-  const post = await reddit.getPostById(targetId as `t3_${string}`);
-  const currentBody = post.body ?? "";
   const userId = context.userId ?? "unknown";
+
+  const stored = await redis.get(postDataKey(targetId));
+  if (!stored) {
+    return {
+      showToast: {
+        text: "This post predates the React UI and can't be edited here.",
+        appearance: "neutral",
+      },
+    };
+  }
+  const episode = JSON.parse(stored) as EpisodeData;
 
   await redis.set(`pending_edit:${userId}`, targetId, {
     expiration: new Date(Date.now() + 600_000), // 10 minutes
@@ -568,29 +798,29 @@ async function onMenuEditPostBody(req: IncomingMessage): Promise<UiResponse> {
     showForm: {
       name: "editPostBodyForm",
       form: {
-        title: "Edit Post Body",
-        description: "Edit the body of this episode post using Reddit markdown syntax.",
+        title: "Edit Episode Description",
+        description: "Edit the description shown in the episode post using Markdown.",
         acceptLabel: "Save changes",
         fields: [
           {
             type: "paragraph",
             name: "body",
-            label: "Post body (markdown)",
-            helpText: "Supports Reddit markdown syntax (e.g. **bold**, *italic*, [links](url), > blockquote).",
+            label: "Description (markdown)",
+            helpText: "Supports Markdown (e.g. **bold**, *italic*, [links](url), > blockquote).",
             required: true,
-            defaultValue: currentBody,
+            defaultValue: episode.description,
             lineHeight: 15,
           },
         ],
       },
-      data: { body: currentBody },
+      data: { body: episode.description },
     },
   };
 }
 
 /**
- * Form submit → saves the edited body to the post.
- * Retrieves the target post ID from Redis using the current user's ID.
+ * Form submit → updates the episode description stored under
+ * `post_data:{postId}` so the React client renders the new text on next load.
  */
 async function onFormEditPostBodySubmit(req: IncomingMessage): Promise<UiResponse> {
   const { body } = await readBody<{ body: string }>(req);
@@ -601,13 +831,106 @@ async function onFormEditPostBodySubmit(req: IncomingMessage): Promise<UiRespons
     return { showToast: { text: "Session expired — please try again.", appearance: "neutral" } };
   }
 
-  const post = await reddit.getPostById(postId as `t3_${string}`);
-  await post.edit({ text: body });
+  const stored = await redis.get(postDataKey(postId));
+  if (!stored) {
+    await redis.del(`pending_edit:${userId}`);
+    return { showToast: { text: "Post data missing — can't edit.", appearance: "neutral" } };
+  }
+  const episode = JSON.parse(stored) as EpisodeData;
+  const updated: EpisodeData = { ...episode, description: body };
+  await redis.set(postDataKey(postId), JSON.stringify(updated));
   await redis.del(`pending_edit:${userId}`);
 
+  const post = await reddit.getPostById(postId as `t3_${string}`);
   return {
-    showToast: { text: "Post updated.", appearance: "success" },
+    showToast: { text: "Episode description updated.", appearance: "success" },
     navigateTo: `https://www.reddit.com${post.permalink}`,
+  };
+}
+
+/** Client `GET /api/post-data` → returns EpisodeData + current display settings for the current post. */
+async function onGetPostData(): Promise<PostDataResponse> {
+  const postId = context.postId;
+  if (!postId) return { error: "not_found" };
+
+  const [stored, buttonColor, buttonPosition] = await Promise.all([
+    redis.get(postDataKey(postId)),
+    settings.get<string>("listenButtonColor"),
+    settings.get<string>("listenButtonPosition"),
+  ]);
+
+  if (!stored) return { error: "not_found" };
+
+  const display: DisplaySettings = {
+    listenButtonColor: buttonColor || undefined,
+    listenButtonPosition: (buttonPosition as "top" | "bottom" | undefined) ?? "bottom",
+  };
+
+  return { episode: JSON.parse(stored) as EpisodeData, display };
+}
+
+const CLIENT_ERRORS_KEY = "client_errors";
+const CLIENT_ERRORS_MAX = 50;
+
+async function appendClientError(entry: Record<string, unknown>): Promise<void> {
+  const current = await redis.get(CLIENT_ERRORS_KEY);
+  let arr: Record<string, unknown>[] = [];
+  if (current) {
+    try { arr = JSON.parse(current) as Record<string, unknown>[]; } catch { arr = []; }
+  }
+  arr.unshift(entry);
+  if (arr.length > CLIENT_ERRORS_MAX) arr.length = CLIENT_ERRORS_MAX;
+  await redis.set(CLIENT_ERRORS_KEY, JSON.stringify(arr));
+}
+
+async function onLogClientError(req: IncomingMessage): Promise<{ ok: true }> {
+  try {
+    const r = await readBody<ClientErrorReport>(req);
+    await appendClientError({ ...r, ts: new Date().toISOString() });
+  } catch (e) {
+    try {
+      await appendClientError({ ts: new Date().toISOString(), parseError: e instanceof Error ? e.message : String(e) });
+    } catch {}
+  }
+  return { ok: true };
+}
+
+async function onListClientErrors(): Promise<{ entries: string }> {
+  const raw = (await redis.get(CLIENT_ERRORS_KEY)) ?? "[]";
+  return { entries: raw };
+}
+
+async function onMenuViewClientErrors(): Promise<UiResponse> {
+  const raw = (await redis.get(CLIENT_ERRORS_KEY)) ?? "[]";
+  let pretty = raw;
+  let count = 0;
+  try {
+    const arr = JSON.parse(raw) as unknown[];
+    count = arr.length;
+    pretty = JSON.stringify(arr, null, 2);
+  } catch {}
+  if (count === 0) {
+    return { showToast: { text: "No client errors captured yet.", appearance: "neutral" } };
+  }
+  return {
+    showForm: {
+      name: "viewClientErrorsForm",
+      form: {
+        title: `Client errors (${count})`,
+        description: "Most recent first. Read-only.",
+        acceptLabel: "Close",
+        fields: [
+          {
+            type: "paragraph",
+            name: "errors",
+            label: "Captured errors",
+            defaultValue: pretty.slice(0, 10000),
+            lineHeight: 20,
+          },
+        ],
+      },
+      data: {},
+    },
   };
 }
 
