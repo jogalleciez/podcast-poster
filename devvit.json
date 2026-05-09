@@ -16,8 +16,8 @@
   "menu": {
     "items": [
       {
-        "label": "Post most recent episode",
-        "description": "Fetches the latest episode from configured RSS feed and creates new posts.",
+        "label": "Post an episode",
+        "description": "Pick an episode from a configured feed and post it to the subreddit.",
         "location": "subreddit",
         "forUserType": "moderator",
         "endpoint": "/internal/menu/post-create"
@@ -30,13 +30,6 @@
         "endpoint": "/internal/menu/open-settings"
       },
       {
-        "label": "Edit post body",
-        "description": "Edit the text body of this episode post.",
-        "location": "post",
-        "forUserType": "moderator",
-        "endpoint": "/internal/menu/edit-post-body"
-      },
-      {
         "label": "View client errors (debug)",
         "description": "Show recent client-side errors captured from the WebView.",
         "location": "subreddit",
@@ -46,8 +39,8 @@
     ]
   },
   "forms": {
-    "editPostBodyForm": "/internal/form/edit-post-body-submit",
     "selectFeedForm": "/internal/form/select-feed-submit",
+    "selectEpisodeForm": "/internal/form/select-episode-submit",
     "viewClientErrorsForm": "/internal/form/view-client-errors-submit"
   },
   "triggers": {
@@ -87,14 +80,7 @@
         "cdn.atp.fm",
         "podcasts.files.bbci.co.uk",
         "feeds.megaphone.fm",
-        "traffic.megaphone.fm",
-        "api.audioboom.com",
-        "dts.podtrac.com",
-        "f.prxu.org",
-        "npr.brightspotcdn.com",
-        "content.production.cdn.art19.com",
-        "megaphone.imgix.net",
-        "afp-9384.calisto.simplecastaudio.com"
+        "api.audioboom.com"
       ]
     }
   },
@@ -115,7 +101,7 @@
       "feedUrls": {
         "type": "paragraph",
         "label": "RSS Feed URLs",
-        "helpText": "One feed per line, format: URL | Podcast Name | Link URL. Only the URL is required. See the README for examples and details.",
+        "helpText": "One feed per line, format: URL | Podcast Name | Link URL. Only the URL is required. See the README for examples and details. Don't know the RSS feed URL? Search for the podcast at podcastindex.org to find it.",
         "defaultValue": ""
       },
       "postFlairId": {
@@ -129,60 +115,6 @@
         "label": "Post Flair Text Override",
         "helpText": "Optional. Custom flair text to display. Only used when a Flair Template ID is set above.",
         "defaultValue": ""
-      },
-      "pollingFrequency": {
-        "type": "select",
-        "label": "Polling Frequency",
-        "options": [
-          {
-            "label": "Hourly",
-            "value": "hourly"
-          },
-          {
-            "label": "Daily",
-            "value": "daily"
-          },
-          {
-            "label": "Weekly",
-            "value": "weekly"
-          }
-        ],
-        "defaultValue": "hourly"
-      },
-      "weeklyPollingDay": {
-        "type": "select",
-        "label": "Weekly Polling Day",
-        "options": [
-          {
-            "label": "Sunday",
-            "value": "0"
-          },
-          {
-            "label": "Monday",
-            "value": "1"
-          },
-          {
-            "label": "Tuesday",
-            "value": "2"
-          },
-          {
-            "label": "Wednesday",
-            "value": "3"
-          },
-          {
-            "label": "Thursday",
-            "value": "4"
-          },
-          {
-            "label": "Friday",
-            "value": "5"
-          },
-          {
-            "label": "Saturday",
-            "value": "6"
-          }
-        ],
-        "defaultValue": "0"
       },
       "includePodcastNameInTitle": {
         "type": "boolean",
@@ -211,6 +143,12 @@
           { "label": "Top — above the description", "value": "top" }
         ],
         "defaultValue": "bottom"
+      },
+      "feedHistoryLimit": {
+        "type": "number",
+        "label": "Feed History Depth",
+        "helpText": "How many recent episodes to load in the episode picker. Higher values let you find older episodes but may be slower to load. Default: 50.",
+        "defaultValue": 50
       }
     }
   }

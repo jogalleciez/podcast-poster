@@ -3,7 +3,6 @@ import { createHash } from "node:crypto";
 import { cache, context, reddit, redis, settings } from "@devvit/web/server";
 import type { TaskResponse } from "@devvit/web/server";
 import type {
-  MenuItemRequest,
   PartialJsonValue,
   TriggerResponse,
   UiResponse,
@@ -49,14 +48,11 @@ async function onRequest(
     case ApiEndpoint.OnPostCreate:
       body = await onMenuPostLatest();
       break;
-    case ApiEndpoint.EditPostBodyMenu:
-      body = await onMenuEditPostBody(req);
-      break;
-    case ApiEndpoint.EditPostBodySubmit:
-      body = await onFormEditPostBodySubmit(req);
-      break;
     case ApiEndpoint.SelectFeedSubmit:
       body = await onFormSelectFeedSubmit(req);
+      break;
+    case ApiEndpoint.SelectEpisodeSubmit:
+      body = await onFormSelectEpisodeSubmit(req);
       break;
     case ApiEndpoint.OpenSettings:
       body = await onMenuOpenSettings();
@@ -204,8 +200,14 @@ function stripPrivacyNotices(text: string): string {
 // RSS helpers
 // ---------------------------------------------------------------------------
 
+type SpreakerListItem = {
+  episode_id: number;
+  title?: string;
+  published_at?: string;
+};
+
 type SpreakerListResponse = {
-  response: { items: Array<{ episode_id: number }> };
+  response: { items: SpreakerListItem[]; next_url?: string };
 };
 
 type SpreakerEpisodeDetail = {
@@ -232,8 +234,15 @@ type SpreakerDetailResponse = {
   response: { episode: SpreakerEpisodeDetail };
 };
 
+type SpreakerShowMeta = {
+  title?: string;
+  description?: string;
+  image_url?: string;
+  catchphrase?: string;
+};
+
 type SpreakerShowDetailResponse = {
-  response: { show?: { title?: string } };
+  response: { show?: SpreakerShowMeta };
 };
 
 function extractSpreakerShowId(url: string): string | null {
@@ -245,54 +254,140 @@ function extractSpreakerShowId(url: string): string | null {
 // overrides (nameOverride, postLinkUrl) are applied below the cache.
 const SPREAKER_TTL_SECONDS = 50 * 60;
 
-async function fetchSpreakerEpisode(feed: FeedConfig): Promise<EpisodeData | null> {
-  const showId = extractSpreakerShowId(feed.url)!;
-
-  const ep = await cache(
+async function fetchSpreakerShowMeta(showId: string): Promise<SpreakerShowMeta | null> {
+  return cache(
     async () => {
-      const fetchOpts = {
-        headers: { "X-Fetch-Reason": "Fetching Spreaker episode data to post to Reddit" },
-      };
-
-      const listResp = await fetch(
-        `https://api.spreaker.com/v2/shows/${showId}/episodes?limit=1`,
-        fetchOpts,
-      );
-      if (!listResp.ok) throw new Error(`Spreaker episodes list failed: ${listResp.status}`);
-      const listData = (await listResp.json()) as SpreakerListResponse;
-      const episodeId = listData.response?.items?.[0]?.episode_id;
-      if (!episodeId) return null;
-
-      const detailResp = await fetch(
-        `https://api.spreaker.com/v2/episodes/${episodeId}`,
-        fetchOpts,
-      );
-      if (!detailResp.ok) throw new Error(`Spreaker episode detail failed: ${detailResp.status}`);
-      const detailData = (await detailResp.json()) as SpreakerDetailResponse;
-      return detailData.response?.episode ?? null;
+      const resp = await fetch(`https://api.spreaker.com/v2/shows/${showId}`, {
+        headers: { "X-Fetch-Reason": "Fetching Spreaker show metadata for episode post" },
+      });
+      if (!resp.ok) return null;
+      const data = (await resp.json()) as SpreakerShowDetailResponse;
+      return data.response?.show ?? null;
     },
-    { key: `spreaker_show:${showId}`, ttl: SPREAKER_TTL_SECONDS },
+    { key: `spreaker_show_meta:${showId}`, ttl: SPREAKER_TTL_SECONDS },
   );
+}
 
-  if (!ep) return null;
-
-  const podcastTitle = feed.nameOverride || ep.show?.title || "Podcast";
+function spreakerDetailToEpisode(ep: SpreakerEpisodeDetail, feed: FeedConfig, showMeta?: SpreakerShowMeta | null): EpisodeData {
+  const podcastTitle = feed.nameOverride || ep.show?.title || showMeta?.title || "Podcast";
   const guid = ep.rss_guid || String(ep.episode_id);
   const episodeTitle = ep.title ?? "Untitled Episode";
   const rawDescription = ep.description_html || ep.description || "";
   const description = NodeHtmlMarkdown.translate(rawDescription).trim();
   const audioUrl = ep.download_url || ep.playback_url || ep.media_url || "";
   const linkUrl = ep.site_url || "";
-  const podcastArtworkUrl = ep.show?.image_url || undefined;
-  const podcastTagline = ep.show?.catchphrase || undefined;
-  const rawShowDesc = ep.show?.description || "";
+  const podcastTagline = ep.show?.catchphrase || showMeta?.catchphrase || undefined;
+  const rawShowDesc = ep.show?.description || showMeta?.description || "";
   const podcastDescription = rawShowDesc
     ? NodeHtmlMarkdown.translate(rawShowDesc).trim() || undefined
     : undefined;
   const pubDate = ep.published_at ? new Date(ep.published_at).toISOString() : undefined;
-  const durationSecs = parseDurationSecs(ep.duration);
+  // Spreaker returns duration in milliseconds; divide by 1000 to get seconds.
+  // Guard: if the value is already ≤ 86400 it can't be ms for any real episode
+  // (that would be ≤ 86 seconds), so treat it as seconds to avoid dividing
+  // correctly-scaled values from future API changes.
+  const rawDuration = typeof ep.duration === "number" && ep.duration > 86400
+    ? ep.duration / 1000
+    : ep.duration;
+  const durationSecs = parseDurationSecs(rawDuration);
 
-  return { guid, podcastTitle, episodeTitle, description, audioUrl, linkUrl, postLinkUrl: feed.postLinkUrl, podcastArtworkUrl, podcastTagline, podcastDescription, pubDate, durationSecs };
+  return { guid, podcastTitle, episodeTitle, description, audioUrl, linkUrl, postLinkUrl: feed.postLinkUrl, feedUrl: feed.url, podcastTagline, podcastDescription, pubDate, durationSecs };
+}
+
+async function fetchSpreakerEpisode(feed: FeedConfig): Promise<EpisodeData | null> {
+  const showId = extractSpreakerShowId(feed.url)!;
+
+  const [ep, showMeta] = await Promise.all([
+    cache(
+      async () => {
+        const fetchOpts = {
+          headers: { "X-Fetch-Reason": "Fetching Spreaker episode data to post to Reddit" },
+        };
+
+        const listResp = await fetch(
+          `https://api.spreaker.com/v2/shows/${showId}/episodes?limit=1`,
+          fetchOpts,
+        );
+        if (!listResp.ok) throw new Error(`Spreaker episodes list failed: ${listResp.status}`);
+        const listData = (await listResp.json()) as SpreakerListResponse;
+        const episodeId = listData.response?.items?.[0]?.episode_id;
+        if (!episodeId) return null;
+
+        const detailResp = await fetch(
+          `https://api.spreaker.com/v2/episodes/${episodeId}`,
+          fetchOpts,
+        );
+        if (!detailResp.ok) throw new Error(`Spreaker episode detail failed: ${detailResp.status}`);
+        const detailData = (await detailResp.json()) as SpreakerDetailResponse;
+        return detailData.response?.episode ?? null;
+      },
+      { key: `spreaker_show:${showId}`, ttl: SPREAKER_TTL_SECONDS },
+    ),
+    fetchSpreakerShowMeta(showId),
+  ]);
+
+  if (!ep) return null;
+  return spreakerDetailToEpisode(ep, feed, showMeta);
+}
+
+// Spreaker caps `limit` at 100 per page. Walk `next_url` to gather more.
+const SPREAKER_PAGE_SIZE = 100;
+
+async function fetchSpreakerListItems(feed: FeedConfig, limit: number): Promise<SpreakerListItem[]> {
+  const showId = extractSpreakerShowId(feed.url)!;
+  return cache(
+    async () => {
+      const headers = { "X-Fetch-Reason": "Fetching Spreaker episode list for episode picker" };
+      const items: SpreakerListItem[] = [];
+      let url: string | undefined =
+        `https://api.spreaker.com/v2/shows/${showId}/episodes?limit=${Math.min(limit, SPREAKER_PAGE_SIZE)}`;
+
+      while (url && items.length < limit) {
+        const resp = await fetch(url, { headers });
+        if (!resp.ok) throw new Error(`Spreaker episodes list failed: ${resp.status}`);
+        const data = (await resp.json()) as SpreakerListResponse;
+        const page = data.response?.items ?? [];
+        items.push(...page);
+        url = page.length > 0 ? data.response?.next_url : undefined;
+      }
+
+      return items.slice(0, limit);
+    },
+    { key: `spreaker_picklist:${showId}:${limit}`, ttl: SPREAKER_TTL_SECONDS },
+  );
+}
+
+async function fetchSpreakerPickList(feed: FeedConfig, limit: number): Promise<EpisodePickItem[]> {
+  const items = await fetchSpreakerListItems(feed, limit);
+  return items.map(it => ({
+    guid: String(it.episode_id),
+    title: it.title ?? "Untitled Episode",
+    pubDate: it.published_at ? new Date(it.published_at).toISOString() : undefined,
+  }));
+}
+
+async function fetchSpreakerEpisodeByGuid(feed: FeedConfig, guid: string): Promise<EpisodeData | null> {
+  // Picker uses episode_id stringified as guid; if rss_guid was used elsewhere
+  // it would not match here, but the picker we built always emits episode_id.
+  const episodeId = guid;
+  const showId = extractSpreakerShowId(feed.url)!;
+  const [detail, showMeta] = await Promise.all([
+    cache(
+      async () => {
+        const resp = await fetch(
+          `https://api.spreaker.com/v2/episodes/${episodeId}`,
+          { headers: { "X-Fetch-Reason": "Fetching Spreaker episode detail for moderator-picked post" } },
+        );
+        if (!resp.ok) throw new Error(`Spreaker episode detail failed: ${resp.status}`);
+        const data = (await resp.json()) as SpreakerDetailResponse;
+        return data.response?.episode ?? null;
+      },
+      { key: `spreaker_episode:${episodeId}`, ttl: SPREAKER_TTL_SECONDS },
+    ),
+    fetchSpreakerShowMeta(showId),
+  ]);
+  if (!detail) return null;
+  return spreakerDetailToEpisode(detail, feed, showMeta);
 }
 
 // ---------------------------------------------------------------------------
@@ -332,47 +427,20 @@ function extractAudioboomChannelId(url: string): string | null {
 
 const AUDIOBOOM_TTL_SECONDS = 50 * 60;
 
-async function fetchAudioboomEpisode(feed: FeedConfig): Promise<EpisodeData | null> {
-  const channelId = extractAudioboomChannelId(feed.url)!;
-  const fetchOpts = { headers: { "X-Fetch-Reason": "Fetching Audioboom episode data to post to Reddit" } };
-
-  const [clip, channelDetail] = await Promise.all([
-    cache(
-      async () => {
-        const resp = await fetch(
-          `https://api.audioboom.com/channels/${channelId}/audio_clips?limit=1`,
-          fetchOpts,
-        );
-        if (!resp.ok) throw new Error(`Audioboom clips list failed: ${resp.status}`);
-        const data = (await resp.json()) as AudioboomClipsResponse;
-        return data.body?.audio_clips?.[0] ?? null;
-      },
-      { key: `audioboom_channel:${channelId}`, ttl: AUDIOBOOM_TTL_SECONDS },
-    ),
-    cache(
-      async () => {
-        const resp = await fetch(
-          `https://api.audioboom.com/channels/${channelId}`,
-          fetchOpts,
-        );
-        if (!resp.ok) return null;
-        const data = (await resp.json()) as AudioboomChannelResponse;
-        return data.body?.channel ?? null;
-      },
-      { key: `audioboom_channel_meta:${channelId}`, ttl: AUDIOBOOM_TTL_SECONDS },
-    ),
-  ]);
-
-  if (!clip) return null;
+function audioboomClipToEpisode(
+  clip: AudioboomClip,
+  channelDetail: AudioboomChannelDetail | null,
+  feed: FeedConfig,
+): EpisodeData | null {
+  const guid = clip.id != null ? String(clip.id) : "";
+  if (!guid) return null;
 
   const podcastTitle = feed.nameOverride || clip.channel?.title || channelDetail?.title || "Podcast";
-  const guid = clip.id != null ? String(clip.id) : "";
   const episodeTitle = clip.title ?? "Untitled Episode";
   const rawDescription = clip.formatted_description || clip.description || "";
   const description = NodeHtmlMarkdown.translate(rawDescription).trim();
   const audioUrl = clip.urls?.high_mp3 ?? "";
   const linkUrl = clip.id != null ? `https://audioboom.com/posts/${clip.id}` : "";
-  const podcastArtworkUrl = channelDetail?.urls?.logo_image?.original || undefined;
   const rawShowDesc = channelDetail?.description || "";
   const podcastDescription = rawShowDesc
     ? NodeHtmlMarkdown.translate(rawShowDesc).trim() || undefined
@@ -380,9 +448,53 @@ async function fetchAudioboomEpisode(feed: FeedConfig): Promise<EpisodeData | nu
   const pubDate = clip.uploaded_at ? new Date(clip.uploaded_at).toISOString() : undefined;
   const durationSecs = parseDurationSecs(clip.duration);
 
-  if (!guid) return null;
+  return { guid, podcastTitle, episodeTitle, description, audioUrl, linkUrl, postLinkUrl: feed.postLinkUrl, feedUrl: feed.url, podcastDescription, pubDate, durationSecs };
+}
 
-  return { guid, podcastTitle, episodeTitle, description, audioUrl, linkUrl, postLinkUrl: feed.postLinkUrl, podcastArtworkUrl, podcastDescription, pubDate, durationSecs };
+async function fetchAudioboomChannelDetail(channelId: string): Promise<AudioboomChannelDetail | null> {
+  const fetchOpts = { headers: { "X-Fetch-Reason": "Fetching Audioboom channel metadata" } };
+  return cache(
+    async () => {
+      const resp = await fetch(`https://api.audioboom.com/channels/${channelId}`, fetchOpts);
+      if (!resp.ok) return null;
+      const data = (await resp.json()) as AudioboomChannelResponse;
+      return data.body?.channel ?? null;
+    },
+    { key: `audioboom_channel_meta:${channelId}`, ttl: AUDIOBOOM_TTL_SECONDS },
+  );
+}
+
+async function fetchAudioboomEpisodes(feed: FeedConfig, limit: number): Promise<EpisodeData[]> {
+  const channelId = extractAudioboomChannelId(feed.url)!;
+  const fetchOpts = { headers: { "X-Fetch-Reason": "Fetching Audioboom episode list to post to Reddit" } };
+
+  const [clips, channelDetail] = await Promise.all([
+    cache(
+      async () => {
+        const resp = await fetch(
+          `https://api.audioboom.com/channels/${channelId}/audio_clips?limit=${limit}`,
+          fetchOpts,
+        );
+        if (!resp.ok) throw new Error(`Audioboom clips list failed: ${resp.status}`);
+        const data = (await resp.json()) as AudioboomClipsResponse;
+        return data.body?.audio_clips ?? [];
+      },
+      { key: `audioboom_channel_clips:${channelId}:${limit}`, ttl: AUDIOBOOM_TTL_SECONDS },
+    ),
+    fetchAudioboomChannelDetail(channelId),
+  ]);
+
+  const episodes: EpisodeData[] = [];
+  for (const clip of clips) {
+    const ep = audioboomClipToEpisode(clip, channelDetail, feed);
+    if (ep) episodes.push(ep);
+  }
+  return episodes;
+}
+
+async function fetchAudioboomEpisode(feed: FeedConfig): Promise<EpisodeData | null> {
+  const episodes = await fetchAudioboomEpisodes(feed, 1);
+  return episodes[0] ?? null;
 }
 
 // Narrow types for the subset of RSS / Atom fields we actually consume.
@@ -466,12 +578,6 @@ function firstTranscriptUrl(t: PodcastTranscript | PodcastTranscript[] | undefin
   if (!t) return undefined;
   const first = Array.isArray(t) ? t[0] : t;
   return first?.["@_url"] || undefined;
-}
-
-function readItunesImage(val: { "@_href"?: string } | string | undefined): string | undefined {
-  if (!val) return undefined;
-  if (typeof val === "string") return val || undefined;
-  return val["@_href"] || undefined;
 }
 
 function extractPeople(
@@ -566,45 +672,13 @@ function readGuid(g: RssGuid | undefined): string {
   return g["#text"] ?? "";
 }
 
-async function fetchLatestEpisode(feed: FeedConfig): Promise<EpisodeData | null> {
-  if (extractSpreakerShowId(feed.url)) {
-    return fetchSpreakerEpisode(feed);
-  }
-  if (extractAudioboomChannelId(feed.url)) {
-    return fetchAudioboomEpisode(feed);
-  }
-
-  const response = await fetch(feed.url, {
-    headers: {
-      "X-Fetch-Reason": "Fetching RSS feed to check for new podcast episodes to post to Reddit",
-      "Accept-Encoding": "identity",
-    },
-  });
-  if (!response.ok) {
-    throw new Error(`RSS fetch failed for feed ${feed.index}: ${response.status}`);
-  }
-  const xmlData = await response.text();
-
-  const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
-  const result = parser.parse(xmlData) as RssDocument;
-
-  const channel = result.rss?.channel ?? result.feed;
-  if (!channel) return null;
-
+function parseRssItem(item: RssItem, channel: RssChannel, feed: FeedConfig): EpisodeData | null {
   const podcastTitle = feed.nameOverride || channel.title || "Podcast";
-  const podcastArtworkUrl = readItunesImage(channel["itunes:image"]) ?? channel.image?.url;
   const podcastTagline = channel["itunes:subtitle"] || undefined;
   const rawShowDesc = channel["content:encoded"] ?? channel.description ?? channel["itunes:summary"] ?? "";
   const podcastDescription = rawShowDesc
     ? stripPrivacyNotices(NodeHtmlMarkdown.translate(rawShowDesc).trim()) || undefined
     : undefined;
-
-  const rawItems = channel.item ?? channel.entry;
-  if (!rawItems) return null;
-  const items: RssItem[] = Array.isArray(rawItems) ? rawItems : [rawItems];
-  if (items.length === 0) return null;
-
-  const item = items[0]!;
 
   const guid = readGuid(item.guid) || item.id || item.link || "";
   const episodeTitle = item.title ?? "Untitled Episode";
@@ -656,7 +730,149 @@ async function fetchLatestEpisode(feed: FeedConfig): Promise<EpisodeData | null>
 
   if (!guid || !episodeTitle) return null;
 
-  return { guid, podcastTitle, episodeTitle, description, audioUrl, linkUrl, postLinkUrl: feed.postLinkUrl, podcastArtworkUrl, podcastTagline, podcastDescription, pubDate, durationSecs, episodeNumber, seasonNumber, explicit, episodeAuthor, transcriptUrl, episodeSubtitle, keywords, episodeType, people, chaptersUrl, fundingLinks, seasonName, episodeDisplay, soundbites };
+  return { guid, podcastTitle, episodeTitle, description, audioUrl, linkUrl, postLinkUrl: feed.postLinkUrl, feedUrl: feed.url, podcastTagline, podcastDescription, pubDate, durationSecs, episodeNumber, seasonNumber, explicit, episodeAuthor, transcriptUrl, episodeSubtitle, keywords, episodeType, people, chaptersUrl, fundingLinks, seasonName, episodeDisplay, soundbites };
+}
+
+async function fetchRssEpisodes(feed: FeedConfig, limit: number): Promise<EpisodeData[]> {
+  const response = await fetch(feed.url, {
+    headers: {
+      "X-Fetch-Reason": "Fetching RSS feed to list episodes for posting",
+      "Accept-Encoding": "identity",
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`RSS fetch failed for feed ${feed.index}: ${response.status}`);
+  }
+  const xmlData = await response.text();
+
+  const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
+  const result = parser.parse(xmlData) as RssDocument;
+
+  const channel = result.rss?.channel ?? result.feed;
+  if (!channel) return [];
+
+  const rawItems = channel.item ?? channel.entry;
+  if (!rawItems) return [];
+  const items: RssItem[] = Array.isArray(rawItems) ? rawItems : [rawItems];
+
+  const episodes: EpisodeData[] = [];
+  for (const it of items) {
+    const ep = parseRssItem(it, channel, feed);
+    if (ep) episodes.push(ep);
+  }
+
+  // Most RSS feeds publish newest-first; sort defensively in case they don't.
+  episodes.sort((a, b) => {
+    const aTs = a.pubDate ? Date.parse(a.pubDate) : 0;
+    const bTs = b.pubDate ? Date.parse(b.pubDate) : 0;
+    return bTs - aTs;
+  });
+
+  return episodes.slice(0, limit);
+}
+
+async function fetchLatestEpisode(feed: FeedConfig): Promise<EpisodeData | null> {
+  if (extractSpreakerShowId(feed.url)) {
+    return fetchSpreakerEpisode(feed);
+  }
+  if (extractAudioboomChannelId(feed.url)) {
+    return fetchAudioboomEpisode(feed);
+  }
+  const eps = await fetchRssEpisodes(feed, 1);
+  return eps[0] ?? null;
+}
+
+// ---------------------------------------------------------------------------
+// Episode picker — list episodes for the moderator selector and resolve a
+// single episode by its GUID for posting.
+// ---------------------------------------------------------------------------
+
+type EpisodePickItem = { guid: string; title: string; pubDate?: string };
+
+const DEFAULT_EPISODE_HISTORY_LIMIT = 50;
+
+async function getEpisodeHistoryLimit(): Promise<number> {
+  const raw = await settings.get<number>("feedHistoryLimit");
+  const n = typeof raw === "number" && raw > 0 ? Math.round(raw) : DEFAULT_EPISODE_HISTORY_LIMIT;
+  return Math.max(1, n);
+}
+
+async function fetchEpisodePickList(feed: FeedConfig, limit: number): Promise<EpisodePickItem[]> {
+  if (extractSpreakerShowId(feed.url)) {
+    return fetchSpreakerPickList(feed, limit);
+  }
+  if (extractAudioboomChannelId(feed.url)) {
+    const eps = await fetchAudioboomEpisodes(feed, limit);
+    return eps.map(e => ({ guid: e.guid, title: e.episodeTitle, pubDate: e.pubDate }));
+  }
+  const eps = await fetchRssEpisodes(feed, limit);
+  return eps.map(e => ({ guid: e.guid, title: e.episodeTitle, pubDate: e.pubDate }));
+}
+
+async function fetchEpisodeByGuid(feed: FeedConfig, guid: string, limit: number): Promise<EpisodeData | null> {
+  if (extractSpreakerShowId(feed.url)) {
+    return fetchSpreakerEpisodeByGuid(feed, guid);
+  }
+  if (extractAudioboomChannelId(feed.url)) {
+    const eps = await fetchAudioboomEpisodes(feed, limit);
+    return eps.find(e => e.guid === guid) ?? null;
+  }
+  const eps = await fetchRssEpisodes(feed, limit);
+  return eps.find(e => e.guid === guid) ?? null;
+}
+
+function feedUrlHash(url: string): string {
+  return createHash("sha1").update(url).digest("hex").slice(0, 12);
+}
+
+function findFeedByHash(feeds: FeedConfig[], hash: string): FeedConfig | undefined {
+  return feeds.find(f => feedUrlHash(f.url) === hash);
+}
+
+function truncateLabel(s: string, max: number): string {
+  return s.length > max ? s.slice(0, max - 1) + "…" : s;
+}
+
+function formatEpisodeOptionLabel(item: EpisodePickItem): string {
+  const datePrefix = item.pubDate ? `${item.pubDate.slice(0, 10)} — ` : "";
+  return truncateLabel(`${datePrefix}${item.title}`, 100);
+}
+
+async function showEpisodePicker(feed: FeedConfig, limit: number): Promise<UiResponse> {
+  let items: EpisodePickItem[];
+  try {
+    items = await fetchEpisodePickList(feed, limit);
+  } catch (e) {
+    console.error(`Failed to load episode list for feed ${feed.index}:`, e);
+    return { showToast: { text: "Couldn't load episodes from that feed.", appearance: "neutral" } };
+  }
+
+  if (items.length === 0) {
+    return { showToast: { text: "No episodes found in that feed.", appearance: "neutral" } };
+  }
+
+  const hash = feedUrlHash(feed.url);
+
+  return {
+    showForm: {
+      name: "selectEpisodeForm",
+      form: {
+        title: "Pick an episode to post",
+        fields: [
+          {
+            type: "select",
+            name: "episodePick",
+            label: "Choose an episode (newest first)",
+            required: true,
+            options: items.map(it => ({
+              label: formatEpisodeOptionLabel(it),
+              value: `${hash}|${it.guid}`,
+            })),
+          },
+        ],
+      },
+    },
+  };
 }
 
 async function fetchFeedTitle(feed: FeedConfig): Promise<string> {
@@ -665,18 +881,8 @@ async function fetchFeedTitle(feed: FeedConfig): Promise<string> {
   try {
     const showId = extractSpreakerShowId(feed.url);
     if (showId) {
-      const title = await cache(
-        async () => {
-          const resp = await fetch(`https://api.spreaker.com/v2/shows/${showId}`, {
-            headers: { "X-Fetch-Reason": "Fetching Spreaker show title for feed selector" },
-          });
-          if (!resp.ok) return null;
-          const data = (await resp.json()) as SpreakerShowDetailResponse;
-          return data.response?.show?.title ?? null;
-        },
-        { key: `spreaker_show_title:${showId}`, ttl: SPREAKER_TTL_SECONDS },
-      );
-      return title ?? `Feed ${feed.index}`;
+      const meta = await fetchSpreakerShowMeta(showId);
+      return meta?.title ?? `Feed ${feed.index}`;
     }
 
     const audioboomChannelId = extractAudioboomChannelId(feed.url);
@@ -770,84 +976,6 @@ async function onMenuOpenSettings(): Promise<UiResponse> {
   return { navigateTo: settingsUrl() };
 }
 
-/**
- * Post menu → "Edit post body" (moderator only)
- * Shows a pre-populated form with the current post body.
- * Stores the post ID in Redis so the submit handler can retrieve it.
- */
-async function onMenuEditPostBody(req: IncomingMessage): Promise<UiResponse> {
-  const { targetId } = await readBody<MenuItemRequest>(req);
-  const userId = context.userId ?? "unknown";
-
-  const stored = await redis.get(postDataKey(targetId));
-  if (!stored) {
-    return {
-      showToast: {
-        text: "This post predates the React UI and can't be edited here.",
-        appearance: "neutral",
-      },
-    };
-  }
-  const episode = JSON.parse(stored) as EpisodeData;
-
-  await redis.set(`pending_edit:${userId}`, targetId, {
-    expiration: new Date(Date.now() + 600_000), // 10 minutes
-  });
-
-  return {
-    showForm: {
-      name: "editPostBodyForm",
-      form: {
-        title: "Edit Episode Description",
-        description: "Edit the description shown in the episode post using Markdown.",
-        acceptLabel: "Save changes",
-        fields: [
-          {
-            type: "paragraph",
-            name: "body",
-            label: "Description (markdown)",
-            helpText: "Supports Markdown (e.g. **bold**, *italic*, [links](url), > blockquote).",
-            required: true,
-            defaultValue: episode.description,
-            lineHeight: 15,
-          },
-        ],
-      },
-      data: { body: episode.description },
-    },
-  };
-}
-
-/**
- * Form submit → updates the episode description stored under
- * `post_data:{postId}` so the React client renders the new text on next load.
- */
-async function onFormEditPostBodySubmit(req: IncomingMessage): Promise<UiResponse> {
-  const { body } = await readBody<{ body: string }>(req);
-  const userId = context.userId ?? "unknown";
-  const postId = await redis.get(`pending_edit:${userId}`);
-
-  if (!postId) {
-    return { showToast: { text: "Session expired — please try again.", appearance: "neutral" } };
-  }
-
-  const stored = await redis.get(postDataKey(postId));
-  if (!stored) {
-    await redis.del(`pending_edit:${userId}`);
-    return { showToast: { text: "Post data missing — can't edit.", appearance: "neutral" } };
-  }
-  const episode = JSON.parse(stored) as EpisodeData;
-  const updated: EpisodeData = { ...episode, description: body };
-  await redis.set(postDataKey(postId), JSON.stringify(updated));
-  await redis.del(`pending_edit:${userId}`);
-
-  const post = await reddit.getPostById(postId as `t3_${string}`);
-  return {
-    showToast: { text: "Episode description updated.", appearance: "success" },
-    navigateTo: `https://www.reddit.com${post.permalink}`,
-  };
-}
-
 /** Client `GET /api/post-data` → returns EpisodeData + current display settings for the current post. */
 async function onGetPostData(): Promise<PostDataResponse> {
   const postId = context.postId;
@@ -934,63 +1062,10 @@ async function onMenuViewClientErrors(): Promise<UiResponse> {
   };
 }
 
-type FeedPostResult =
-  | { kind: "posted"; feed: FeedConfig; episodeTitle: string; postUrl: string }
-  | { kind: "skipped"; feed: FeedConfig; reason: string }
-  | { kind: "error"; feed: FeedConfig; reason: string };
-
-async function postOneFeed(feed: FeedConfig): Promise<FeedPostResult> {
-  try {
-    const episode = await fetchLatestEpisode(feed);
-    if (!episode) {
-      return { kind: "skipped", feed, reason: "no episodes found" };
-    }
-    const postUrl = await createEpisodePost(episode);
-    await redis.set(feedRedisKey(feed), episode.guid);
-    return { kind: "posted", feed, episodeTitle: episode.episodeTitle, postUrl };
-  } catch (e) {
-    console.error(`Error posting feed ${feed.index}:`, e);
-    const msg = e instanceof Error ? e.message : String(e);
-    const reason = msg.includes("is not allowed") ? "domain not allowlisted" : "unknown error";
-    return { kind: "error", feed, reason };
-  }
-}
-
 /**
- * Shared helper — posts the latest episode from each feed in the given list, in
- * parallel. Each feed's success/failure is independent. Returns a UiResponse
- * toast (+ navigateTo on success).
- */
-async function postFromFeeds(feeds: FeedConfig[]): Promise<UiResponse> {
-  const results = await Promise.all(feeds.map(postOneFeed));
-
-  const posted = results.filter((r): r is Extract<FeedPostResult, { kind: "posted" }> => r.kind === "posted");
-  const issues = results.filter(r => r.kind !== "posted");
-
-  if (posted.length > 0) {
-    const summary = posted.length === 1
-      ? `Posted: ${posted[0]!.episodeTitle}`
-      : `Posted ${posted.length} episodes`;
-    return {
-      showToast: { text: summary, appearance: "success" },
-      navigateTo: posted[0]!.postUrl,
-    };
-  }
-
-  return {
-    showToast: {
-      text: issues.length > 0
-        ? `Errors: ${issues.map(r => `Feed ${r.feed.index}: ${r.reason}`).join("; ")}`
-        : "Nothing to post.",
-      appearance: "neutral",
-    },
-  };
-}
-
-/**
- * Subreddit menu → "Post most recent episode"
- * With 1 feed: posts immediately.
- * With 2+ feeds: shows a select modal to choose which feed (or all).
+ * Subreddit menu → "Post an episode"
+ * With 1 feed: opens the episode picker directly.
+ * With 2+ feeds: shows a feed selector first, which then opens the episode picker.
  */
 async function onMenuPostLatest(): Promise<UiResponse> {
   const isEnabled = await settings.get<boolean>("appEnabled");
@@ -1007,8 +1082,10 @@ async function onMenuPostLatest(): Promise<UiResponse> {
     };
   }
 
+  const limit = await getEpisodeHistoryLimit();
+
   if (feeds.length === 1) {
-    return postFromFeeds(feeds);
+    return showEpisodePicker(feeds[0]!, limit);
   }
 
   const feedLabels = await Promise.all(feeds.map(fetchFeedTitle));
@@ -1017,20 +1094,17 @@ async function onMenuPostLatest(): Promise<UiResponse> {
     showForm: {
       name: "selectFeedForm",
       form: {
-        title: "Post episode from...",
+        title: "Pick a feed",
         fields: [
           {
             type: "select",
             name: "feedIndex",
             label: "Choose a feed",
             required: true,
-            options: [
-              { label: "All Feeds", value: "all" },
-              ...feeds.map((f, i) => ({
-                label: feedLabels[i] ?? f.url,
-                value: String(f.index),
-              })),
-            ],
+            options: feeds.map((f, i) => ({
+              label: feedLabels[i] ?? f.url,
+              value: String(f.index),
+            })),
           },
         ],
       },
@@ -1039,7 +1113,7 @@ async function onMenuPostLatest(): Promise<UiResponse> {
 }
 
 /**
- * Form submit → posts from the selected feed (or all feeds).
+ * Form submit → opens the episode picker for the selected feed.
  */
 async function onFormSelectFeedSubmit(req: IncomingMessage): Promise<UiResponse> {
   const { feedIndex } = await readBody<{ feedIndex: string[] }>(req);
@@ -1050,15 +1124,54 @@ async function onFormSelectFeedSubmit(req: IncomingMessage): Promise<UiResponse>
     return { showToast: { text: "No feeds configured.", appearance: "neutral" } };
   }
 
-  const feedsToPost = selected === "all"
-    ? allFeeds
-    : allFeeds.filter(f => String(f.index) === selected);
-
-  if (feedsToPost.length === 0) {
+  const feed = allFeeds.find(f => String(f.index) === selected);
+  if (!feed) {
     return { showToast: { text: "Selected feed not found.", appearance: "neutral" } };
   }
 
-  return postFromFeeds(feedsToPost);
+  const limit = await getEpisodeHistoryLimit();
+  return showEpisodePicker(feed, limit);
+}
+
+/** Form submit → posts the chosen individual episode. */
+async function onFormSelectEpisodeSubmit(req: IncomingMessage): Promise<UiResponse> {
+  const { episodePick } = await readBody<{ episodePick: string[] }>(req);
+  const raw = episodePick?.[0];
+  if (!raw) {
+    return { showToast: { text: "No episode selected.", appearance: "neutral" } };
+  }
+
+  const sep = raw.indexOf("|");
+  if (sep < 0) {
+    return { showToast: { text: "Invalid episode selection.", appearance: "neutral" } };
+  }
+  const hash = raw.slice(0, sep);
+  const guid = raw.slice(sep + 1);
+
+  const feeds = await getFeeds();
+  const feed = findFeedByHash(feeds, hash);
+  if (!feed) {
+    return { showToast: { text: "Feed no longer exists.", appearance: "neutral" } };
+  }
+
+  try {
+    const limit = await getEpisodeHistoryLimit();
+    const episode = await fetchEpisodeByGuid(feed, guid, limit);
+    if (!episode) {
+      return { showToast: { text: "Episode not found in feed.", appearance: "neutral" } };
+    }
+    const postUrl = await createEpisodePost(episode);
+    await redis.set(feedRedisKey(feed), episode.guid);
+    return {
+      showToast: { text: `Posted: ${episode.episodeTitle}`, appearance: "success" },
+      navigateTo: postUrl,
+    };
+  } catch (e) {
+    console.error(`Failed to post selected episode (feed ${feed.index}):`, e);
+    const msg = e instanceof Error ? e.message : String(e);
+    const reason = msg.includes("is not allowed") ? "domain not allowlisted" : "unknown error";
+    return { showToast: { text: `Error posting episode: ${reason}`, appearance: "neutral" } };
+  }
 }
 
 async function checkOneFeed(feed: FeedConfig): Promise<void> {
@@ -1082,49 +1195,18 @@ async function checkOneFeed(feed: FeedConfig): Promise<void> {
   }
 }
 
-/**
- * Scheduler cron (every 15 min) → posts conditionally based on configured rate.
- * Each feed is checked in parallel and tracked independently via its own
- * URL-keyed Redis entry.
- */
+/** Scheduler cron (every 15 min) → posts any new episodes found across all feeds. */
 async function onCheckRSS(): Promise<TaskResponse> {
-  const [isEnabled, freqRaw, weeklyDayRaw] = await Promise.all([
-    settings.get<boolean>("appEnabled"),
-    settings.get<string>("pollingFrequency"),
-    settings.get<string>("weeklyPollingDay"),
-  ]);
-
+  const isEnabled = await settings.get<boolean>("appEnabled");
   if (isEnabled === false) {
     console.log("Podcast poster is disabled in settings.");
     return { status: "ok" };
-  }
-
-  const freq = freqRaw || "hourly";
-  const weeklyDay = weeklyDayRaw || "0";
-
-  const now = new Date();
-  const todayDateString = now.toISOString().split("T")[0] ?? ""; // YYYY-MM-DD
-  const todayDayOfWeek = now.getUTCDay().toString(); // 0-6
-
-  if (freq === "weekly" && todayDayOfWeek !== weeklyDay) {
-    console.log(`Polling set to weekly on day ${weeklyDay}, but today is day ${todayDayOfWeek}. Skipping.`);
-    return { status: "ok" };
-  }
-
-  if (freq === "daily" || freq === "weekly") {
-    const lastCheckDate = await redis.get("last_global_check_date");
-    if (lastCheckDate === todayDateString) return { status: "ok" };
   }
 
   const feeds = await getFeeds();
   if (feeds.length === 0) return { status: "ok" };
 
   await Promise.all(feeds.map(checkOneFeed));
-
-  if (freq === "daily" || freq === "weekly") {
-    await redis.set("last_global_check_date", todayDateString);
-  }
-
   return { status: "ok" };
 }
 

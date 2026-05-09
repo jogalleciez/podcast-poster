@@ -11,3 +11,13 @@ mcp.json
 # Source asset for the app icon — committed copy lives at assets/icon.png
 pod-poster.png
 pod-poster.icon
+
+# Build artifacts
+tsconfig.tsbuildinfo
+
+# Tool/editor config directories
+.claude/
+.kilo/
+.superpowers/
+.zed/
+podcast-namespace/

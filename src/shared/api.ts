@@ -2,9 +2,8 @@ export type CheckRSSRequest = {};
 
 export const ApiEndpoint = {
   OnPostCreate: "/internal/menu/post-create",
-  EditPostBodyMenu: "/internal/menu/edit-post-body",
-  EditPostBodySubmit: "/internal/form/edit-post-body-submit",
   SelectFeedSubmit: "/internal/form/select-feed-submit",
+  SelectEpisodeSubmit: "/internal/form/select-episode-submit",
   OpenSettings: "/internal/menu/open-settings",
   OnAppInstall: "/internal/on-app-install",
   CheckRSS: "/internal/cron/check-rss",
@@ -34,7 +33,7 @@ export type EpisodeData = {
   audioUrl: string;
   linkUrl: string;
   postLinkUrl?: string;
-  podcastArtworkUrl?: string;
+  feedUrl?: string;
   podcastTagline?: string;
   podcastDescription?: string;
   // Details tab metadata
@@ -76,3 +75,13 @@ export type ClientErrorReport = {
 export type PostDataResponse =
   | { episode: EpisodeData; display: DisplaySettings }
   | { error: "not_found" };
+
+/** Converts a duration in whole seconds to H:MM:SS or M:SS (no leading zeros on the leftmost unit). */
+export function formatDuration(secs: number): string {
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = Math.round(secs % 60);
+  const mm = String(m).padStart(2, "0");
+  const ss = String(s).padStart(2, "0");
+  return h > 0 ? `${h}:${mm}:${ss}` : `${m}:${ss}`;
+}
