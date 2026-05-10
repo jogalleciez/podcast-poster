@@ -29,34 +29,100 @@ function formatSoundbiteTime(secs: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+function safeUrl(url: string): string {
+  return url.startsWith("http://") ? "https://" + url.slice(7) : url;
+}
+
 function navigateToNewTab(url: string, mobileFallbackUrl?: string): void {
-  const safeUrl = url.startsWith("http://") ? "https://" + url.slice(7) : url;
+  const safe = safeUrl(url);
   try {
     if (context.client != null) {
-      // Mobile native app: window.open is blocked. Use Devvit's navigateTo.
-      // podcast:// and other custom schemes may be rejected — fall back to web URL.
       try {
-        navigateTo(safeUrl);
+        navigateTo(safe);
       } catch {
-        if (mobileFallbackUrl) {
-          const safeFallback = mobileFallbackUrl.startsWith("http://")
-            ? "https://" + mobileFallbackUrl.slice(7)
-            : mobileFallbackUrl;
-          navigateTo(safeFallback);
-        }
+        if (mobileFallbackUrl) navigateTo(safeUrl(mobileFallbackUrl));
       }
       return;
     }
-    const win = window.open(safeUrl, "_blank", "noopener,noreferrer");
-    if (!win) navigateTo(safeUrl);
+    const win = window.open(safe, "_blank", "noopener,noreferrer");
+    if (!win) navigateTo(safe);
   } catch (err) {
     reportClientError({
       context: "navigateToNewTab",
       message: String((err as Error)?.message ?? err),
       stack: (err as Error)?.stack,
-      source: safeUrl,
+      source: safe,
     });
   }
+}
+
+function LinkButton({ href, mobileFallbackHref, className, style, children }: {
+  href: string;
+  mobileFallbackHref?: string;
+  className?: string;
+  style?: CSSProperties;
+  children: ReactNode;
+}): ReactElement {
+  const safe = safeUrl(href);
+  const isMailto = href.startsWith("mailto:");
+  if (isMobile) {
+    if (isMailto) {
+      return <span className={className} style={style}>{children}</span>;
+    }
+    return (
+      <button className={className} style={style} onClick={() => navigateToNewTab(href, mobileFallbackHref)}>
+        {children}
+      </button>
+    );
+  }
+  if (isMailto) {
+    return (
+      <a
+        href={safe}
+        className={className}
+        style={style}
+        onClick={(e: ReactMouseEvent) => {
+          e.preventDefault();
+          try { navigateTo(safe); } catch {}
+        }}
+      >
+        {children}
+      </a>
+    );
+  }
+  return (
+    <a
+      href={safe}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={className}
+      style={style}
+      onClick={(e: ReactMouseEvent) => {
+        e.preventDefault();
+        navigateToNewTab(href, mobileFallbackHref);
+      }}
+    >
+      {children}
+    </a>
+  );
+}
+
+function CopyableEmail({ email }: { email: string }): ReactElement {
+  const [copied, setCopied] = useState(false);
+  function handleCopy(): void {
+    navigator.clipboard.writeText(email).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }).catch(() => {});
+  }
+  return (
+    <>
+      <span className="author-email" onClick={handleCopy}>{email}</span>
+      <button className="copy-btn" onClick={handleCopy} aria-label="Copy email">
+        {copied ? "✅" : "📋"}
+      </button>
+    </>
+  );
 }
 
 type FetchState =
@@ -122,6 +188,13 @@ export function App(): ReactElement {
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, []);
+
+  useEffect(() => {
+    if (state.kind !== "ready" || !state.display.accentColor) return;
+    const root = document.documentElement;
+    root.style.setProperty("--pp-link", state.display.accentColor);
+    root.style.setProperty("--pp-button-bg", state.display.accentColor);
+  }, [state]);
 
   useEffect(() => {
     const onError = (e: ErrorEvent) => reportClientError({
@@ -190,17 +263,14 @@ export function App(): ReactElement {
         return <>{children}</>;
       }
       return (
-        <button className="footer-link" onClick={() => navigateToNewTab(href)}>
+        <LinkButton className="footer-link" href={href}>
           {children}
-        </button>
+        </LinkButton>
       );
     },
   };
 
   const listenUrl = episode.postLinkUrl || episode.linkUrl || episode.audioUrl;
-  const buttonStyle: CSSProperties | undefined = display.listenButtonColor
-    ? { background: display.listenButtonColor }
-    : undefined;
   const atTop = display.listenButtonPosition === "top";
 
   // On iOS, try the podcast:// scheme to open the user's default podcast app.
@@ -212,18 +282,14 @@ export function App(): ReactElement {
     : null;
 
   const listenButton = listenUrl ? (
-    <button
+    <LinkButton
       className="listen-button"
-      style={buttonStyle}
-      onClick={() =>
-        navigateToNewTab(
-          isIOS && podcastSchemeUrl ? podcastSchemeUrl : listenUrl,
-          isIOS && podcastSchemeUrl ? listenUrl : undefined,
-        )
-      }
+      style={{ textDecoration: "none" }}
+      href={isIOS && podcastSchemeUrl ? podcastSchemeUrl : listenUrl}
+      mobileFallbackHref={isIOS && podcastSchemeUrl ? listenUrl : undefined}
     >
       Listen to this episode
-    </button>
+    </LinkButton>
   ) : null;
 
   return (
@@ -235,15 +301,18 @@ export function App(): ReactElement {
           title="Expand post"
           aria-label="Expand post"
         >
-          ⛶
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M10 2h4v4M6 14H2v-4M14 2L9.5 6.5M2 14l4.5-4.5" />
+          </svg>
         </button>
       )}
-      {atTop && listenButton}
-      <p className="podcast-name">{episode.podcastTitle}</p>
-      {episode.podcastTagline && (
-        <p className="tagline">{episode.podcastTagline}</p>
-      )}
-      <h1 className="episode-title">{episode.episodeTitle}</h1>
+      <header className="episode-header">
+        <p className="podcast-name">{episode.podcastTitle}</p>
+        {episode.podcastTagline && (
+          <p className="tagline">{episode.podcastTagline}</p>
+        )}
+        <h1 className="episode-title">{episode.episodeTitle}</h1>
+      </header>
       {(() => {
         const showShowTab = !!episode.podcastDescription;
         const current = showShowTab ? activeTab : activeTab === "show" ? "episode" : activeTab;
@@ -279,6 +348,7 @@ export function App(): ReactElement {
                 Details
               </button>
             </div>
+            {atTop && listenButton}
             <div className="tab-panel" role="tabpanel">
               {current === "details" ? (
                 <dl className="details-list">
@@ -302,9 +372,15 @@ export function App(): ReactElement {
                     <dt>Explicit</dt>
                     <dd>{episode.explicit ? "🤬" : "😇"}</dd>
                   </>)}
-                  {episode.episodeAuthor && (<>
+                  {(episode.episodeAuthor || episode.authorEmail) && (<>
                     <dt>Author</dt>
-                    <dd>{episode.episodeAuthor}</dd>
+                    <dd>
+                      {episode.episodeAuthor}
+                      {episode.authorEmail && (<>
+                        {episode.episodeAuthor && " — "}
+                        <CopyableEmail email={episode.authorEmail} />
+                      </>)}
+                    </dd>
                   </>)}
                   {episode.people && episode.people.length > 0 && (<>
                     <dt>People</dt>
@@ -312,7 +388,7 @@ export function App(): ReactElement {
                       <span key={i}>
                         {i > 0 && ", "}
                         {p.href
-                          ? <button className="footer-link" onClick={() => navigateToNewTab(p.href!)}>{p.name}</button>
+                          ? <LinkButton className="footer-link" href={p.href!}>{p.name}</LinkButton>
                           : p.name}
                         {p.role && ` (${p.role})`}
                       </span>
@@ -320,11 +396,11 @@ export function App(): ReactElement {
                   </>)}
                   {episode.transcriptUrl && (<>
                     <dt>Transcript</dt>
-                    <dd><button className="footer-link" onClick={() => navigateToNewTab(episode.transcriptUrl!)}>Transcript</button></dd>
+                    <dd><LinkButton className="footer-link" href={episode.transcriptUrl!}>Transcript</LinkButton></dd>
                   </>)}
                   {episode.chaptersUrl && (<>
                     <dt>Chapters</dt>
-                    <dd><button className="footer-link" onClick={() => navigateToNewTab(episode.chaptersUrl!)}>View chapters</button></dd>
+                    <dd><LinkButton className="footer-link" href={episode.chaptersUrl!}>View chapters</LinkButton></dd>
                   </>)}
                   {episode.episodeType && episode.episodeType !== "full" && (<>
                     <dt>Type</dt>
@@ -357,9 +433,9 @@ export function App(): ReactElement {
                   {current === "episode" && episode.fundingLinks && episode.fundingLinks.length > 0 && (
                     <div className="funding">
                       {episode.fundingLinks.map((f, i) => (
-                        <button key={i} className="footer-link" onClick={() => navigateToNewTab(f.url)}>
+                        <LinkButton key={i} className="footer-link" href={f.url}>
                           {f.label}
-                        </button>
+                        </LinkButton>
                       ))}
                     </div>
                   )}
@@ -372,22 +448,29 @@ export function App(): ReactElement {
       {!atTop && listenButton}
       <p className="footer">
         This is a bot that posts new episodes automatically.{" "}
-        <button className="footer-link" onClick={() => navigateToNewTab(APP_URL)}>
+        <LinkButton className="footer-link" href={APP_URL}>
           Add this to your subreddit
-        </button>{" "}
+        </LinkButton>{" "}
         or{" "}
-        <button className="footer-link" onClick={() => navigateToNewTab(BOT_REQUEST_URL)}>
+        <LinkButton className="footer-link" href={BOT_REQUEST_URL}>
           request mods use it
-        </button>
+        </LinkButton>
         .
       </p>
+      {isMobile && webViewMode === "inline" && hasOverflow && (
+        <div className="overflow-fade" aria-hidden="true" />
+      )}
       {isMobile && webViewMode === "inline" && hasOverflow && (
         <button
           className="expand-hint"
           onClick={handleExpand}
           aria-label="Expand post for full content"
         >
-          <span className="expand-hint-text">Tap to expand for full content</span>
+          <span className="expand-hint-icon">
+            <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M10 2h4v4M6 14H2v-4M14 2L9.5 6.5M2 14l4.5-4.5" />
+            </svg>
+          </span>
         </button>
       )}
     </article>

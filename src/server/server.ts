@@ -281,7 +281,7 @@ function spreakerDetailToEpisode(ep: SpreakerEpisodeDetail, feed: FeedConfig, sh
   const podcastDescription = rawShowDesc
     ? NodeHtmlMarkdown.translate(rawShowDesc).trim() || undefined
     : undefined;
-  const pubDate = ep.published_at ? new Date(ep.published_at).toISOString() : undefined;
+  const pubDate = safeIsoDate(ep.published_at);
   // Spreaker returns duration in milliseconds; divide by 1000 to get seconds.
   // Guard: if the value is already ≤ 86400 it can't be ms for any real episode
   // (that would be ≤ 86 seconds), so treat it as seconds to avoid dividing
@@ -362,7 +362,7 @@ async function fetchSpreakerPickList(feed: FeedConfig, limit: number): Promise<E
   return items.map(it => ({
     guid: String(it.episode_id),
     title: it.title ?? "Untitled Episode",
-    pubDate: it.published_at ? new Date(it.published_at).toISOString() : undefined,
+    pubDate: safeIsoDate(it.published_at),
   }));
 }
 
@@ -445,7 +445,7 @@ function audioboomClipToEpisode(
   const podcastDescription = rawShowDesc
     ? NodeHtmlMarkdown.translate(rawShowDesc).trim() || undefined
     : undefined;
-  const pubDate = clip.uploaded_at ? new Date(clip.uploaded_at).toISOString() : undefined;
+  const pubDate = safeIsoDate(clip.uploaded_at);
   const durationSecs = parseDurationSecs(clip.duration);
 
   return { guid, podcastTitle, episodeTitle, description, audioUrl, linkUrl, postLinkUrl: feed.postLinkUrl, feedUrl: feed.url, podcastDescription, pubDate, durationSecs };
@@ -530,6 +530,7 @@ type RssItem = {
   "itunes:season"?: number | string;
   "itunes:explicit"?: string | boolean;
   "itunes:author"?: string;
+  author?: string;
   "podcast:transcript"?: PodcastTranscript | PodcastTranscript[];
   "podcast:person"?: PodcastPerson | PodcastPerson[];
   "podcast:chapters"?: PodcastChapters | PodcastChapters[];
@@ -550,6 +551,8 @@ type RssChannel = {
   entry?: RssItem | RssItem[];
   "itunes:explicit"?: string | boolean;
   "itunes:author"?: string;
+  "itunes:owner"?: { "itunes:name"?: string; "itunes:email"?: string };
+  managingEditor?: string;
   "podcast:funding"?: PodcastFunding | PodcastFunding[];
   "podcast:person"?: PodcastPerson | PodcastPerson[];
 };
@@ -661,6 +664,24 @@ function readPodcastEpisodeVal(val: PodcastEpisodeVal | undefined): { number?: n
     display: val["@_display"]?.trim() || undefined,
   };
 }
+function safeIsoDate(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  const d = new Date(raw);
+  return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
+}
+
+function extractEmail(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  const match = raw.match(/[\w.+-]+@[\w.-]+\.\w+/);
+  return match?.[0] || undefined;
+}
+
+function extractRfc2822Name(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  const match = raw.match(/\((.+)\)/);
+  return match?.[1]?.trim() || undefined;
+}
+
 type RssDocument = {
   rss?: { channel?: RssChannel };
   feed?: RssChannel;
@@ -692,9 +713,18 @@ function parseRssItem(item: RssItem, channel: RssChannel, feed: FeedConfig): Epi
 
   const description = stripPrivacyNotices(NodeHtmlMarkdown.translate(rawDescription).trim());
 
-  const episodeSubtitle = item["itunes:subtitle"]
+  const rawSubtitle = item["itunes:subtitle"]
     ? stripPrivacyNotices(NodeHtmlMarkdown.translate(item["itunes:subtitle"]).trim()) || undefined
     : undefined;
+  const collapse = (s: string) => s.replace(/\s+/g, " ");
+  const stripMd = (s: string) => s.replace(/[*_`#\[\]]/g, "");
+  const subtitleRedundant = rawSubtitle && description && (
+    collapse(description).startsWith(collapse(rawSubtitle)) ||
+    collapse(rawSubtitle).startsWith(collapse(description)) ||
+    collapse(stripMd(description)).startsWith(collapse(rawSubtitle)) ||
+    collapse(stripMd(description)).includes(collapse(stripMd(rawSubtitle)))
+  );
+  const episodeSubtitle = subtitleRedundant ? undefined : rawSubtitle;
 
   const rawKeywords = item["itunes:keywords"] || channel["itunes:keywords"];
   const keywords = rawKeywords
@@ -709,10 +739,15 @@ function parseRssItem(item: RssItem, channel: RssChannel, feed: FeedConfig): Epi
 
   const audioUrl = item.enclosure?.["@_url"] ?? item.link ?? "";
   const linkUrl = item.link ?? "";
-  const pubDate = item.pubDate ? new Date(item.pubDate).toISOString() : undefined;
+  const pubDate = safeIsoDate(item.pubDate);
   const durationSecs = parseDurationSecs(item["itunes:duration"]);
   const explicit = parseExplicit(item["itunes:explicit"] ?? channel["itunes:explicit"]);
-  const episodeAuthor = item["itunes:author"] || channel["itunes:author"] || undefined;
+  const episodeAuthor = item["itunes:author"] || channel["itunes:author"]
+    || extractRfc2822Name(item.author) || undefined;
+  const authorEmail = extractEmail(item.author)
+    || channel["itunes:owner"]?.["itunes:email"]
+    || extractEmail(channel.managingEditor)
+    || undefined;
   const transcriptUrl = firstTranscriptUrl(item["podcast:transcript"]);
 
   const podcastEp = readPodcastEpisodeVal(item["podcast:episode"]);
@@ -730,7 +765,7 @@ function parseRssItem(item: RssItem, channel: RssChannel, feed: FeedConfig): Epi
 
   if (!guid || !episodeTitle) return null;
 
-  return { guid, podcastTitle, episodeTitle, description, audioUrl, linkUrl, postLinkUrl: feed.postLinkUrl, feedUrl: feed.url, podcastTagline, podcastDescription, pubDate, durationSecs, episodeNumber, seasonNumber, explicit, episodeAuthor, transcriptUrl, episodeSubtitle, keywords, episodeType, people, chaptersUrl, fundingLinks, seasonName, episodeDisplay, soundbites };
+  return { guid, podcastTitle, episodeTitle, description, audioUrl, linkUrl, postLinkUrl: feed.postLinkUrl, feedUrl: feed.url, podcastTagline, podcastDescription, pubDate, durationSecs, episodeNumber, seasonNumber, explicit, episodeAuthor, authorEmail, transcriptUrl, episodeSubtitle, keywords, episodeType, people, chaptersUrl, fundingLinks, seasonName, episodeDisplay, soundbites };
 }
 
 async function fetchRssEpisodes(feed: FeedConfig, limit: number): Promise<EpisodeData[]> {
@@ -989,9 +1024,14 @@ async function onGetPostData(): Promise<PostDataResponse> {
 
   if (!stored) return { error: "not_found" };
 
+  // Devvit select settings may return an array (e.g. ["top"]) or a string.
+  const resolvedPosition = Array.isArray(buttonPosition)
+    ? (buttonPosition as string[])[0]
+    : buttonPosition;
+
   const display: DisplaySettings = {
-    listenButtonColor: buttonColor || undefined,
-    listenButtonPosition: (buttonPosition as "top" | "bottom" | undefined) ?? "bottom",
+    accentColor: buttonColor || undefined,
+    listenButtonPosition: (resolvedPosition as "top" | "bottom" | undefined) ?? "bottom",
   };
 
   return { episode: JSON.parse(stored) as EpisodeData, display };

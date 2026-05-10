@@ -43,6 +43,7 @@ export type EpisodeData = {
   seasonNumber?: number;
   explicit?: boolean;
   episodeAuthor?: string;
+  authorEmail?: string;
   transcriptUrl?: string;
   // Additional description fields
   episodeSubtitle?: string;
@@ -58,7 +59,7 @@ export type EpisodeData = {
 };
 
 export type DisplaySettings = {
-  listenButtonColor?: string;
+  accentColor?: string;
   listenButtonPosition?: "top" | "bottom";
 };
 

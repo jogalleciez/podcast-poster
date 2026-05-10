@@ -130,8 +130,8 @@
       },
       "listenButtonColor": {
         "type": "string",
-        "label": "Listen Button Color",
-        "helpText": "Optional CSS color for the Listen button (e.g. #ff5733 or coral). Leave blank to use the default Reddit blue.",
+        "label": "Accent Color",
+        "helpText": "Optional CSS color applied to buttons, links, and other accent elements (e.g. #ff5733 or coral). Leave blank to use the default Reddit blue.",
         "defaultValue": ""
       },
       "listenButtonPosition": {
