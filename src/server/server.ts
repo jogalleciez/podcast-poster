@@ -717,7 +717,12 @@ function parseRssItem(item: RssItem, channel: RssChannel, feed: FeedConfig): Epi
     ? stripPrivacyNotices(NodeHtmlMarkdown.translate(item["itunes:subtitle"]).trim()) || undefined
     : undefined;
   const collapse = (s: string) => s.replace(/\s+/g, " ");
-  const stripMd = (s: string) => s.replace(/[*_`#\[\]]/g, "");
+  // Resolve [text](url) links to just text before stripping other markdown chars,
+  // so HTML <a> tags in content:encoded don't break substring matching against
+  // plain-text itunes:subtitle (which has no URLs).
+  const stripMd = (s: string) => s
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/[*_`#\[\]]/g, "");
   // Normalize typographic punctuation to ASCII so smart quotes / en-dashes from
   // HTML entities in content:encoded don't prevent matching plain-text itunes:subtitle.
   const normPunct = (s: string) => s
