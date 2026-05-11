@@ -4,164 +4,75 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**podcast-poster** is a Reddit Devvit application that automatically posts the latest episodes from one or more RSS podcast feeds to a subreddit as standard self-posts. It runs on the Devvit platform (`@devvit/web@0.12.20`) with a Node.js backend. There is no webview or client-side code — posts are plain text posts with episode metadata.
+**podcast-poster** is a Reddit Devvit app (`@devvit/web@0.12.22`) that posts episodes from RSS podcast feeds to a subreddit as **custom WebView posts** with a React client. Moderators configure one or more feeds via app settings; a cron job (every 15 minutes) polls feeds and creates posts. Moderators can also pick a feed/episode manually via subreddit menu items.
 
-**Why it exists:** Subreddit moderators configure one or more RSS feeds via app settings. The app polls feeds on a schedule (hourly, daily, or weekly) and creates Reddit self-posts with the episode title, description (HTML converted to Markdown), and a listen link. Moderators can also manually trigger posts or edit existing post bodies.
+Note: this branch (`feat/custom-post-webview-client`) migrated away from plain self-posts. AGENTS.md still describes the old server-only/self-post architecture — prefer this file when they disagree.
 
-## Quick Start Commands
-
-See **AGENTS.md** for full command details. Essential commands:
+## Quick Start
 
 ```bash
-npm run dev          # Start local development environment (devvit playtest)
-npm run build        # Production build (esbuild with minification)
-npm run type-check   # TypeScript strict type checking (run after every edit)
-npm run deploy       # Build and deploy to Devvit
-npm run launch       # Build, deploy, and publish to app directory
+npm run dev          # devvit playtest (Devvit's own watch script bundles in parallel)
+npm run build        # esbuild bundles both server and client with --minify
+npm run type-check   # tsc --build across project references
+npm run deploy       # build + devvit upload
+npm run launch       # build + deploy + devvit publish
 ```
 
-**Critical:** Always run `npm run type-check` after editing — it enforces strict typing and catches errors that would break the build.
+Always run `npm run type-check` after edits. There is no test suite yet; if you add tests, use `node --test`.
 
-## Architecture Overview
+## Architecture
 
-The project is a **server-only** Devvit Web app with two source directories:
+### Three source modules
+- **`src/server/`** — Node.js backend. Single big router in `src/server/server.ts` dispatches all endpoints. Entry `src/server/index.ts`. Output: `dist/server/index.js` (CommonJS).
+- **`src/client/`** — React 19 WebView client rendered inside the Reddit post. `index.tsx` mounts `App.tsx`, which fetches episode data from `/api/post-data` and renders it with `react-markdown` + `remark-gfm`. Static files (`index.html`, `styles.css`, `fonts/`) are copied into `dist/client/` by a custom esbuild plugin. Output: ESM browser bundle.
+- **`src/shared/`** — `api.ts` holds the `ApiEndpoint` constant map and all shared types (`EpisodeData`, `DisplaySettings`, `PostDataResponse`, `ClientErrorReport`, etc.) used by both server and client.
 
-### 1. Server Module (`src/server/`)
-- **Purpose:** Backend logic running on Devvit's Node.js runtime
-- **Responsibilities:**
-  - HTTP request routing (7 endpoints in `src/server/server.ts`)
-  - RSS feed fetching and parsing (`fast-xml-parser`)
-  - Spreaker API fetching with `cache()` deduplication
-  - Reddit post creation via Devvit SDK (`reddit.submitPost`)
-  - Redis state management (tracking last-posted episode GUID per feed)
-  - Scheduled cron (every 15 minutes) gated by user's `pollingFrequency` setting
-  - Moderator menu triggers for manual posting, settings, and body editing
-- **Output:** `dist/server/index.js` (CommonJS for Node.js)
+### Build (`tools/build.ts`)
+Custom esbuild script that builds server (cjs/node) and client (esm/browser, `jsx: automatic`) in parallel. A `copy-static` plugin copies `src/client/index.html`, `styles.css`, and the `fonts/` directory into `dist/client`. Flags: `--watch`, `--minify`. Metafiles written to `dist/{server,client}.meta.json`.
 
-### 2. Shared Module (`src/shared/`)
-- **Purpose:** Type definitions and API endpoint constants used by the server
-- **Contents:** `api.ts` with `ApiEndpoint` enum and request/response types
+### TypeScript
+Project references in `tools/`: `tsconfig.base.json` (strict), `tsconfig.server.json` (node lib), `tsconfig.client.json` (DOM + react jsx), `tsconfig.shared.json`. Root `tsconfig.json` references them. `allowImportingTsExtensions: true` because **all relative imports must end in `.ts`/`.tsx`** (Devvit bundler requirement).
 
-### Build System: Custom esbuild Bundler
+### Endpoints (see `src/shared/api.ts` for the full list)
+Routed by exact URL match in `server.ts`:
 
-The `tools/build.ts` script:
-- Runs esbuild for the **server only** (no client bundle)
-- Server: CommonJS output for Node.js (`platform: "node"`)
-- Supports `--watch` mode for development
-- Supports `--minify` flag for production
-- Generates a metafile (`dist/server.meta.json`) for bundle analysis
+| Endpoint | Purpose |
+|---|---|
+| `POST /internal/menu/post-create` | Subreddit menu → opens "select feed" form |
+| `POST /internal/form/select-feed-submit` | Form submit → opens "select episode" form for the chosen feed |
+| `POST /internal/form/select-episode-submit` | Form submit → creates a custom post for the picked episode |
+| `POST /internal/menu/open-settings` | Subreddit menu → navigates to app settings |
+| `POST /internal/menu/view-client-errors` | Subreddit menu → opens form listing recent client errors |
+| `POST /internal/form/view-client-errors-submit` | Form close handler |
+| `POST /internal/cron/check-rss` | Cron `*/15 * * * *` — auto-posting |
+| `POST /internal/on-app-install` | Install trigger |
+| `GET  /api/post-data` | Called by the React client to load the episode payload for the current post |
+| `POST /api/log-client-error` | Client error reporter (`reportClientError` in `App.tsx`) |
+| `GET  /api/client-errors` | Read recent client errors (for the debug menu) |
 
-### TypeScript Configuration
+### Redis keys
+- `last_posted_guid:url:{sha1(feed.url).slice(0,12)}` — per-feed last-posted GUID, keyed by a stable URL hash so reordering feeds doesn't lose history. Legacy positional keys (`last_posted_guid:{index}`) are migrated on first read.
+- `post_data:{postId}` — `EpisodeData` payload served to the WebView client. Written at post creation.
+- `spreaker_show:{showId}` — cached Spreaker API JSON (TTL ~50 min). Spreaker feeds use the Spreaker JSON API instead of RSS.
+- Client error log keys (see `onLogClientError` / `onListClientErrors`).
 
-Modular TypeScript configs in `tools/` use project references:
-- `tsconfig.json` — Root config with project references (server, shared)
-- `tsconfig.base.json` — Shared strict configuration
-- `tsconfig.server.json` — Node.js-specific (Node lib)
-- `tsconfig.shared.json` — Shared types only
+### Settings (`devvit.json` → `settings.subreddit`)
+`appEnabled`, `feedUrls` (paragraph; `URL | Name | LinkUrl` per line, `#` for comments), `postFlairId`, `postFlairText`, `includePodcastNameInTitle`, `stickyPost`, `listenButtonColor` (accent color applied across the WebView UI), `listenButtonPosition` (`top`/`bottom`), `feedHistoryLimit` (episodes loaded in the episode picker).
 
-**Key setting:** `allowImportingTsExtensions: true` is needed because `.ts` extensions are **required in imports** (see Code Style in AGENTS.md).
+There is **no** `pollingFrequency` / `weeklyPollingDay` setting in this branch — the cron runs every 15 minutes and each feed is checked against its stored last-posted GUID.
 
-## Key Files & Entry Points
+### Feed pipeline
+`getFeeds()` parses `feedUrls` into `FeedConfig[]`. For each feed: fetch RSS (or Spreaker JSON), parse with `fast-xml-parser`, extract GUID/title/description/audio plus Podcasting 2.0 metadata (`<podcast:person>`, `<podcast:funding>`, `<podcast:chapters>`, `<podcast:soundbite>`, `<podcast:season>`, `<podcast:transcript>`), convert HTML to Markdown via `node-html-markdown`, build an `EpisodeData`, submit a custom post with `reddit.submitPost`, then write `post_data:{postId}` and the per-feed GUID. Fetches run in parallel (`Promise.all` / `allSettled`) to stay under Devvit's 30s endpoint timeout.
 
-| File | Purpose |
-|------|---------|
-| `src/server/index.ts` | Server entry point; initializes HTTP server |
-| `src/server/server.ts` | Main HTTP router; defines 7 endpoints (~646 lines) |
-| `devvit.json` | App manifest: endpoints, scheduler, settings, domain allowlist |
-| `tools/build.ts` | Custom esbuild bundler script (server-only) |
-| `package.json` | Project dependencies and npm scripts |
+## Constraints
 
-## Critical Patterns to Understand
+- **Devvit endpoint timeout: 30s.** Parallelize all independent network calls.
+- **HTTP domain allowlist.** Every RSS host must be in `devvit.json` → `permissions.http.domains` (capped at 25 entries by Devvit — see commit `c4087b7`).
+- **Redis-only state.** No database.
+- **Node 22.6.0+** required (`tools/build.ts` runs under `--experimental-strip-types`).
+- **No `any` without narrowing to `unknown`.** Prefer `type` over `interface`. Explicit return types on exported functions and route handlers.
 
-### HTTP Endpoints (server.ts)
-The server exposes 7 endpoints:
-1. **`POST /internal/menu/post-create`** — Manual moderator trigger (subreddit menu)
-2. **`POST /internal/menu/edit-post-body`** — Opens pre-filled form to edit post body (post menu)
-3. **`POST /internal/form/edit-post-body-submit`** — Saves edited body to the post
-4. **`POST /internal/form/select-feed-submit`** — Posts from selected feed (or all feeds)
-5. **`POST /internal/menu/open-settings`** — Navigates to app settings page
-6. **`POST /internal/cron/check-rss`** — Scheduled cron job (every 15 minutes)
-7. **`POST /internal/on-app-install`** — Installation trigger
-
-Request/response types are defined in `src/shared/api.ts`. Handlers return `UiResponse`, `TaskResponse`, or `TriggerResponse` shapes from `@devvit/web/shared` / `@devvit/web/server`.
-
-### Redis State Management
-
-The app tracks the last-posted episode GUID per-feed using **stable URL-hash keys** so reordering feeds does not corrupt history:
-```
-Key: last_posted_guid:url:{sha1(feed.url).slice(0,12)}
-Value: GUID string
-```
-
-A best-effort migration reads legacy positional keys (`last_posted_guid:{index}`) on first access and writes the stable key.
-
-Additional keys:
-- `pending_edit:{userId}` — Stores post ID during form edit (10-minute expiration)
-- `last_global_check_date` — Tracks date of last global check for daily/weekly gating
-- `spreaker_show:{showId}` — Cached Spreaker API response (50-minute TTL)
-
-### Subreddit Settings
-Configured by moderators in the Devvit app settings:
-
-| Setting | Type | Purpose |
-|---------|------|---------|
-| `appEnabled` | boolean | Enables/disables automatic posting |
-| `feedUrls` | paragraph | Multi-feed configuration: one per line, format `URL [| Name [| LinkUrl]]` |
-| `postFlairId` | string | Optional flair template ID to apply to each post |
-| `postFlairText` | string | Optional flair text override |
-| `pollingFrequency` | select | `hourly` / `daily` / `weekly` — controls posting cadence for all feeds |
-| `weeklyPollingDay` | select | Day of week for weekly posting (0=Sunday … 6=Saturday) |
-
-The cron job fires every 15 minutes but `onCheckRSS` skips posting if the current time doesn't match the configured `pollingFrequency`. All feeds share the same polling schedule.
-
-### Multi-Feed Architecture
-The `getFeeds()` function parses the `feedUrls` setting and returns a `FeedConfig[]` array:
-- Splits on newlines, trims whitespace, skips comments (lines starting with `#`)
-- Each line is split on `|` to extract URL, optional name, optional link URL
-- Feeds are assigned sequential indices (1, 2, 3, ...) for display/selection only
-- The actual Redis key is derived from a SHA-1 hash of the URL for stability
-
-### RSS Fetching & Post Creation
-1. Fetch RSS feed via HTTP (domain allowlisting required in `devvit.json`)
-2. Spreaker feeds are fetched via the Spreaker JSON API instead of RSS
-3. Parse XML with `fast-xml-parser`
-4. Extract episode GUID, title, description, audio URL
-5. Convert HTML descriptions to Markdown with `node-html-markdown`
-6. Create Reddit self-post via `reddit.submitPost`
-7. Store GUID in Redis to prevent reposting
-
-Feeds are checked **in parallel** using `Promise.all` / `Promise.allSettled` to avoid the 30-second Devvit endpoint timeout.
-
-## Important Constraints
-
-### Devvit Platform Limits
-- **Endpoint Timeout:** 30 seconds. Always parallelize independent network calls (RSS fetches, settings reads).
-- **HTTP Domain Allowlisting:** External RSS feeds require pre-approved domains in `devvit.json`. Requests to unlisted domains will fail.
-- **Redis-Only State:** No database access; use Redis for all persistent state.
-
-### TypeScript & Build
-- **File Extensions Required:** All relative imports must include `.ts` extension (e.g., `import { foo } from "./bar.ts"`). This is a Devvit bundler requirement.
-- **Strict Mode:** All TypeScript configs use strict mode. No `any` types without explicit narrowing to `unknown`.
-- **Type Exports:** Use explicit return types on all functions, especially exported endpoints.
-
-### Runtime Requirements
-- **Node.js 22.6.0+** — Required for native ES2023 support and type stripping
-- **Devvit v0.12.20** — Pinned in package.json
-
-### Testing
-The project targets Node.js 22+ and uses the native Node test runner (`node --test`). See AGENTS.md for test commands. Always run tests before pushing.
-
-## Debugging Tips
-
-- **Type errors after edits:** Run `npm run type-check` immediately to catch issues.
-- **Build failures:** Check for missing `.ts` extensions in imports.
-- **RSS feed failures:** Confirm domain is allowlisted in `devvit.json` and check error logs in Devvit console.
-- **Stale state:** Clear Redis keys manually if testing involves GUID tracking.
-- **Endpoint timeout:** If you add more feeds or slower APIs, ensure fetches are parallelized.
-
-## Related Documentation
-
-- **AGENTS.md** — Detailed code style guidelines, command reference, and AI agent directives
-- **README.md** — User-facing documentation, feature overview, and limitations
-- **devvit.json** — App manifest with HTTP endpoints, scheduler config, settings schema, and domain allowlist
-- **package.json** — Project dependencies and npm scripts
+## Related docs
+- `AGENTS.md` — code style and command reference (its architecture section is stale; treat with skepticism).
+- `README.md` — user-facing feature overview.
+- `devvit.json` — manifest: endpoints, scheduler, settings schema, domain allowlist.

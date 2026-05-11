@@ -32,6 +32,7 @@ const serverOpts: BuildOptions = {
 };
 
 const clientStaticFiles = ["src/client/index.html", "src/client/styles.css"];
+const clientStaticDirs = ["src/client/fonts"];
 
 const copyStaticPlugin: Plugin = {
   name: "copy-static",
@@ -42,6 +43,14 @@ const copyStaticPlugin: Plugin = {
       for (const src of clientStaticFiles) {
         const dest = path.join(outdir, path.basename(src));
         fs.copyFileSync(src, dest);
+      }
+      for (const dir of clientStaticDirs) {
+        if (!fs.existsSync(dir)) continue;
+        const destDir = path.join(outdir, path.basename(dir));
+        fs.mkdirSync(destDir, { recursive: true });
+        for (const file of fs.readdirSync(dir)) {
+          fs.copyFileSync(path.join(dir, file), path.join(destDir, file));
+        }
       }
     });
   },

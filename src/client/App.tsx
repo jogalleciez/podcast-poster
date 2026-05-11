@@ -118,8 +118,9 @@ function CopyableEmail({ email }: { email: string }): ReactElement {
   return (
     <>
       <span className="author-email" onClick={handleCopy}>{email}</span>
-      <button className="copy-btn" onClick={handleCopy} aria-label="Copy email">
-        {copied ? "✅" : "📋"}
+      <button className="copy-btn" onClick={handleCopy} aria-label={copied ? "Email copied" : "Copy email"}>
+        <span aria-hidden="true">{copied ? "✅" : "📋"}</span>
+        <span>{copied ? "Copied" : "Copy"}</span>
       </button>
     </>
   );
@@ -372,15 +373,13 @@ export function App(): ReactElement {
                     <dt>Explicit</dt>
                     <dd>{episode.explicit ? "🤬" : "😇"}</dd>
                   </>)}
-                  {(episode.episodeAuthor || episode.authorEmail) && (<>
+                  {episode.episodeAuthor && (<>
                     <dt>Author</dt>
-                    <dd>
-                      {episode.episodeAuthor}
-                      {episode.authorEmail && (<>
-                        {episode.episodeAuthor && " — "}
-                        <CopyableEmail email={episode.authorEmail} />
-                      </>)}
-                    </dd>
+                    <dd>{episode.episodeAuthor}</dd>
+                  </>)}
+                  {episode.authorEmail && (<>
+                    <dt>Email</dt>
+                    <dd><CopyableEmail email={episode.authorEmail} /></dd>
                   </>)}
                   {episode.people && episode.people.length > 0 && (<>
                     <dt>People</dt>

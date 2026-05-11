@@ -741,7 +741,11 @@ function parseRssItem(item: RssItem, channel: RssChannel, feed: FeedConfig): Epi
   const linkUrl = item.link ?? "";
   const pubDate = safeIsoDate(item.pubDate);
   const durationSecs = parseDurationSecs(item["itunes:duration"]);
-  const explicit = parseExplicit(item["itunes:explicit"] ?? channel["itunes:explicit"]);
+  const itemExplicit = parseExplicit(item["itunes:explicit"]);
+  const channelExplicit = parseExplicit(channel["itunes:explicit"]);
+  const explicit = itemExplicit === true || channelExplicit === true
+    ? true
+    : itemExplicit ?? channelExplicit;
   const episodeAuthor = item["itunes:author"] || channel["itunes:author"]
     || extractRfc2822Name(item.author) || undefined;
   const authorEmail = extractEmail(item.author)
