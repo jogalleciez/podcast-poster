@@ -147,8 +147,28 @@ const APP_URL = "https://developers.reddit.com/apps/podcast-poster";
 const isMobile = context.client != null;
 const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
 
+const CACHE_KEY = "pp_post_data";
+
+function readCache(): Extract<FetchState, { kind: "ready" }> | null {
+  try {
+    const raw = sessionStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw) as PostDataResponse;
+    if ("error" in data || !("episode" in data)) return null;
+    return { kind: "ready", episode: data.episode, display: data.display };
+  } catch {
+    return null;
+  }
+}
+
+function writeCache(data: PostDataResponse): void {
+  try {
+    if (!("error" in data)) sessionStorage.setItem(CACHE_KEY, JSON.stringify(data));
+  } catch {}
+}
+
 export function App(): ReactElement {
-  const [state, setState] = useState<FetchState>({ kind: "loading" });
+  const [state, setState] = useState<FetchState>(() => readCache() ?? { kind: "loading" });
   const [activeTab, setActiveTab] = useState<"episode" | "show" | "details">("episode");
   const [webViewMode, setWebViewMode] = useState(getWebViewMode);
   const [hasOverflow, setHasOverflow] = useState(false);
@@ -235,7 +255,10 @@ export function App(): ReactElement {
         const data = (await resp.json()) as PostDataResponse;
         if (cancelled) return;
         if ("error" in data) setState({ kind: "missing" });
-        else setState({ kind: "ready", episode: data.episode, display: data.display });
+        else {
+          writeCache(data);
+          setState({ kind: "ready", episode: data.episode, display: data.display });
+        }
       } catch (e) {
         if (cancelled) return;
         const message = e instanceof Error ? e.message : String(e);
