@@ -718,11 +718,18 @@ function parseRssItem(item: RssItem, channel: RssChannel, feed: FeedConfig): Epi
     : undefined;
   const collapse = (s: string) => s.replace(/\s+/g, " ");
   const stripMd = (s: string) => s.replace(/[*_`#\[\]]/g, "");
+  // Normalize typographic punctuation to ASCII so smart quotes / en-dashes from
+  // HTML entities in content:encoded don't prevent matching plain-text itunes:subtitle.
+  const normPunct = (s: string) => s
+    .replace(/[‘’‚‛]/g, "'")
+    .replace(/[“”„‟]/g, '"')
+    .replace(/[–—]/g, "-")
+    .replace(/…/g, "...");
+  const norm = (s: string) => normPunct(collapse(stripMd(s)));
   const subtitleRedundant = rawSubtitle && description && (
-    collapse(description).startsWith(collapse(rawSubtitle)) ||
-    collapse(rawSubtitle).startsWith(collapse(description)) ||
-    collapse(stripMd(description)).startsWith(collapse(rawSubtitle)) ||
-    collapse(stripMd(description)).includes(collapse(stripMd(rawSubtitle)))
+    norm(description).startsWith(norm(rawSubtitle)) ||
+    norm(rawSubtitle).startsWith(norm(description)) ||
+    norm(description).includes(norm(rawSubtitle))
   );
   const episodeSubtitle = subtitleRedundant ? undefined : rawSubtitle;
 
