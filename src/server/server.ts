@@ -1027,15 +1027,27 @@ async function onMenuOpenSettings(): Promise<UiResponse> {
   return { navigateTo: settingsUrl() };
 }
 
+const SYSTEM_STACK = `-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif`;
+const FONT_FAMILY_BY_KEY: Record<string, string> = {
+  reddit: `-apple-system, BlinkMacSystemFont, "Segoe UI", "IBM Plex Sans", Roboto, "Helvetica Neue", Arial, sans-serif`,
+  figtree: `"Figtree", ${SYSTEM_STACK}`,
+  inter: `"Inter", ${SYSTEM_STACK}`,
+  "ibm-plex-sans": `"IBM Plex Sans", ${SYSTEM_STACK}`,
+  merriweather: `"Merriweather", Georgia, "Times New Roman", serif`,
+  atkinson: `"Atkinson Hyperlegible", ${SYSTEM_STACK}`,
+  system: SYSTEM_STACK,
+};
+
 /** Client `GET /api/post-data` → returns EpisodeData + current display settings for the current post. */
 async function onGetPostData(): Promise<PostDataResponse> {
   const postId = context.postId;
   if (!postId) return { error: "not_found" };
 
-  const [stored, buttonColor, buttonPosition] = await Promise.all([
+  const [stored, buttonColor, buttonPosition, webViewFont] = await Promise.all([
     redis.get(postDataKey(postId)),
     settings.get<string>("listenButtonColor"),
     settings.get<string>("listenButtonPosition"),
+    settings.get<string>("webViewFont"),
   ]);
 
   if (!stored) return { error: "not_found" };
@@ -1044,10 +1056,12 @@ async function onGetPostData(): Promise<PostDataResponse> {
   const resolvedPosition = Array.isArray(buttonPosition)
     ? (buttonPosition as string[])[0]
     : buttonPosition;
+  const resolvedFont = Array.isArray(webViewFont) ? (webViewFont as string[])[0] : webViewFont;
 
   const display: DisplaySettings = {
     accentColor: buttonColor || undefined,
     listenButtonPosition: (resolvedPosition as "top" | "bottom" | undefined) ?? "bottom",
+    fontFamily: FONT_FAMILY_BY_KEY[resolvedFont ?? "reddit"] ?? FONT_FAMILY_BY_KEY["reddit"],
   };
 
   return { episode: JSON.parse(stored) as EpisodeData, display };

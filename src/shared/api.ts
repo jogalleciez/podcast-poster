@@ -61,6 +61,7 @@ export type EpisodeData = {
 export type DisplaySettings = {
   accentColor?: string;
   listenButtonPosition?: "top" | "bottom";
+  fontFamily?: string;
 };
 
 export type ClientErrorReport = {

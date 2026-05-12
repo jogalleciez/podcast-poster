@@ -28,13 +28,6 @@
         "location": "subreddit",
         "forUserType": "moderator",
         "endpoint": "/internal/menu/open-settings"
-      },
-      {
-        "label": "View client errors (debug)",
-        "description": "Show recent client-side errors captured from the WebView.",
-        "location": "subreddit",
-        "forUserType": "moderator",
-        "endpoint": "/internal/menu/view-client-errors"
       }
     ]
   },
@@ -149,6 +142,21 @@
         "label": "Feed History Depth",
         "helpText": "How many recent episodes to load in the episode picker. Higher values let you find older episodes but may be slower to load. Default: 50.",
         "defaultValue": 50
+      },
+      "webViewFont": {
+        "type": "select",
+        "label": "Post Font",
+        "helpText": "Font used in episode posts. 'System / Reddit' matches the OS font used by the Reddit app — it looks at home on any device.",
+        "options": [
+          { "label": "System / Reddit (default)", "value": "reddit" },
+          { "label": "Figtree (friendly)", "value": "figtree" },
+          { "label": "Inter (clean modern)", "value": "inter" },
+          { "label": "IBM Plex Sans (Reddit web)", "value": "ibm-plex-sans" },
+          { "label": "Merriweather (serif)", "value": "merriweather" },
+          { "label": "Atkinson Hyperlegible (accessibility)", "value": "atkinson" },
+          { "label": "System only (no web font)", "value": "system" }
+        ],
+        "defaultValue": "reddit"
       }
     }
   }

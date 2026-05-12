@@ -1,6 +1,6 @@
 # Pod Poster
 
-A [Devvit](https://developers.reddit.com) app that automatically creates Reddit posts for new podcast episodes from an RSS feed. When a new episode is detected, it creates a custom-UI post (rendered by a small React client) with the episode title, podcast name, description, and a "Listen" button — no manual posting required.
+A [Devvit](https://developers.reddit.com) app that automatically creates Reddit posts for new podcast episodes from an RSS feed. When a new episode is detected, it creates a custom-UI post (rendered by a small React client) with the episode title, podcast name, description, and a "Listen" button — no manual posting required. Moderators can also post past episodes on demand by selecting any episode from a feed's history via the subreddit menu.
 
 ---
 

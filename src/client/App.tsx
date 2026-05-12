@@ -211,10 +211,16 @@ export function App(): ReactElement {
   }, []);
 
   useEffect(() => {
-    if (state.kind !== "ready" || !state.display.accentColor) return;
+    if (state.kind !== "ready") return;
     const root = document.documentElement;
-    root.style.setProperty("--pp-link", state.display.accentColor);
-    root.style.setProperty("--pp-button-bg", state.display.accentColor);
+    const { accentColor, fontFamily } = state.display;
+    if (accentColor) {
+      root.style.setProperty("--pp-link", accentColor);
+      root.style.setProperty("--pp-button-bg", accentColor);
+    }
+    if (fontFamily) {
+      root.style.setProperty("--pp-font-family", fontFamily);
+    }
   }, [state]);
 
   useEffect(() => {
