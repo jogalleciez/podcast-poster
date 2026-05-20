@@ -112,12 +112,24 @@ body {
 
 #root {
   height: 100%;
+  overflow: hidden;
+  padding: var(--pp-space-24) var(--pp-space-16);
+  box-sizing: border-box;
+}
+
+/* In expanded mode, lift overflow:hidden from the root elements so Android
+   WebView passes touch-scroll events through to #root's scroll container.
+   Without this, html/body overflow:hidden suppresses touch routing on mobile. */
+html.pp-expanded,
+body.pp-expanded {
+  overflow: visible;
+}
+
+body.pp-expanded #root {
   overflow-y: scroll;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-y: contain;
   touch-action: pan-y;
-  padding: var(--pp-space-24) var(--pp-space-16);
-  box-sizing: border-box;
 }
 
 /* ─── Episode layout ─── */

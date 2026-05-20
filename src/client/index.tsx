@@ -1,5 +1,6 @@
 import { Component, StrictMode, type ErrorInfo, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
+import { context, getWebViewMode } from "@devvit/web/client";
 import { App } from "./App.tsx";
 import { ApiEndpoint, type ClientErrorReport } from "../shared/api.ts";
 
@@ -36,7 +37,23 @@ try {
   const container = document.getElementById("root");
   if (!container) throw new Error("#root not found");
 
-  reportBootError({ context: "boot-ping", message: "client booted" });
+  const mode = getWebViewMode();
+  const cacheKey = "pp_post_data:" + context.postId;
+  let cacheHit = false;
+  try { cacheHit = !!localStorage.getItem(cacheKey); } catch {}
+  reportBootError({
+    context: "boot-info",
+    message: `mode=${mode} vis=${document.visibilityState} cache=${cacheHit} postId=${context.postId} mobile=${context.client != null}`,
+  });
+
+  // Apply the expanded class before React mounts so there is no first-paint
+  // flash where the body clips content with overflow:hidden. Apply to both
+  // html and body — both need overflow:visible for touch events to route
+  // correctly to #root on Android WebView.
+  if (mode === "expanded") {
+    document.documentElement.classList.add("pp-expanded");
+    document.body.classList.add("pp-expanded");
+  }
 
   createRoot(container).render(
     <StrictMode>

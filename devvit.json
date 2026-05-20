@@ -137,6 +137,12 @@
         ],
         "defaultValue": "bottom"
       },
+      "includeEpisodeNumberInTitle": {
+        "type": "boolean",
+        "label": "Include Episode Number in Post Title",
+        "helpText": "When enabled, the episode number is added to the post title. Example: 'My Podcast - Ep. 42 - Great Interview'. If a feed doesn't provide an episode number, the title falls back to the normal format.",
+        "defaultValue": false
+      },
       "feedHistoryLimit": {
         "type": "number",
         "label": "Feed History Depth",

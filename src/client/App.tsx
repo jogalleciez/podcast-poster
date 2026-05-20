@@ -1,7 +1,14 @@
-import { useEffect, useState, type ReactElement, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactElement, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { context, getWebViewMode, navigateTo, requestExpandedMode } from "@devvit/web/client";
+import {
+  addWebViewModeListener,
+  context,
+  getWebViewMode,
+  navigateTo,
+  removeWebViewModeListener,
+  requestExpandedMode,
+} from "@devvit/web/client";
 import {
   ApiEndpoint,
   formatDuration,
@@ -70,7 +77,11 @@ function LinkButton({ href, mobileFallbackHref, className, style, children }: {
       return <span className={className} style={style}>{children}</span>;
     }
     return (
-      <button className={className} style={style} onClick={() => navigateToNewTab(href, mobileFallbackHref)}>
+      <button
+        className={className}
+        style={style}
+        onClick={() => navigateToNewTab(href, mobileFallbackHref)}
+      >
         {children}
       </button>
     );
@@ -147,7 +158,7 @@ const APP_URL = "https://developers.reddit.com/apps/podcast-poster";
 const isMobile = context.client != null;
 const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
 
-const CACHE_KEY = "pp_post_data:" + window.location.href;
+const CACHE_KEY = "pp_post_data:" + context.postId;
 
 function readCache(): Extract<FetchState, { kind: "ready" }> | null {
   try {
@@ -171,7 +182,9 @@ export function App(): ReactElement {
   const [state, setState] = useState<FetchState>(() => readCache() ?? { kind: "loading" });
   const [activeTab, setActiveTab] = useState<"episode" | "show" | "details">("episode");
   const [webViewMode, setWebViewMode] = useState(getWebViewMode);
+  const [pendingExpand, setPendingExpand] = useState(false);
   const [hasOverflow, setHasOverflow] = useState(false);
+  const isExpanded = pendingExpand || webViewMode === "expanded";
 
   useEffect(() => {
     const root = document.getElementById("root");
@@ -191,9 +204,11 @@ export function App(): ReactElement {
   }, [state.kind, activeTab]);
 
   const handleExpand = (e: ReactMouseEvent): void => {
+    setPendingExpand(true);
     try {
       requestExpandedMode(e.nativeEvent, isMobile ? "mobile" : "desktop");
     } catch (err) {
+      setPendingExpand(false);
       reportClientError({
         context: "expand-button",
         message: String((err as Error)?.message ?? err),
@@ -203,11 +218,52 @@ export function App(): ReactElement {
     }
   };
 
-  // Devvit fires "focus" on the window when returning from expanded → inline.
+  // Devvit fires this listener AFTER updating its internal mode state, so the
+  // callback's `mode` argument is authoritative. Replaces the deprecated focus
+  // event, which is unreliable on desktop web (iframe focus doesn't propagate).
   useEffect(() => {
-    const onFocus = () => setWebViewMode(getWebViewMode());
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
+    const onModeChange = (mode: "inline" | "expanded"): void => {
+      reportClientError({ context: "mode-change", message: `${mode} bootMode=${getWebViewMode()} postId=${context.postId}` });
+      setWebViewMode(mode);
+      if (mode !== "expanded") setPendingExpand(false);
+    };
+    addWebViewModeListener(onModeChange);
+    return () => removeWebViewModeListener(onModeChange);
+  }, []);
+
+  // Enable scroll only in expanded mode; inline stays clipped on all platforms.
+  useEffect(() => {
+    document.documentElement.classList.toggle("pp-expanded", isExpanded);
+    document.body.classList.toggle("pp-expanded", isExpanded);
+  }, [isExpanded]);
+
+  // Mobile workaround: in the Reddit app's individual-post view, clicking a
+  // link via navigateTo can leave the WebView blank on return. If JS is still
+  // alive when we regain visibility after a non-trivial absence, reload —
+  // the localStorage cache (keyed by postId) makes this near-instant.
+  //
+  // Guard: only track hides that happen after the page was actually visible.
+  // Devvit preloads non-inline entrypoints in the background, so those iframes
+  // start with visibilityState="hidden". Without this guard they would set
+  // hiddenAt at boot, then reload the moment they became visible on expand.
+  useEffect(() => {
+    if (!isMobile) return;
+    let wasVisible = document.visibilityState === "visible";
+    let hiddenAt: number | null = null;
+    const onVisibilityChange = (): void => {
+      if (document.visibilityState === "hidden") {
+        if (wasVisible) hiddenAt = Date.now();
+      } else if (document.visibilityState === "visible") {
+        wasVisible = true;
+        if (hiddenAt != null) {
+          const hidden = Date.now() - hiddenAt;
+          hiddenAt = null;
+          if (hidden > 8000) window.location.reload();
+        }
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
   }, []);
 
   useEffect(() => {
@@ -254,13 +310,13 @@ export function App(): ReactElement {
       try {
         const resp = await fetch(ApiEndpoint.PostData);
         if (resp.status === 404) {
-          if (!cancelled) setState({ kind: "missing" });
+          if (!cancelled) setState(prev => prev.kind === "ready" ? prev : { kind: "missing" });
           return;
         }
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         const data = (await resp.json()) as PostDataResponse;
         if (cancelled) return;
-        if ("error" in data) setState({ kind: "missing" });
+        if ("error" in data) setState(prev => prev.kind === "ready" ? prev : { kind: "missing" });
         else {
           writeCache(data);
           setState({ kind: "ready", episode: data.episode, display: data.display });
@@ -268,13 +324,27 @@ export function App(): ReactElement {
       } catch (e) {
         if (cancelled) return;
         const message = e instanceof Error ? e.message : String(e);
-        setState({ kind: "error", message });
+        reportClientError({ context: "post-data-fetch", message, stack: (e instanceof Error ? e.stack : undefined) });
+        setState(prev => prev.kind === "ready" ? prev : { kind: "error", message });
       }
     })();
     return () => {
       cancelled = true;
     };
   }, []);
+
+  const wasReadyRef = useRef(false);
+  useEffect(() => {
+    if (state.kind === "ready") {
+      wasReadyRef.current = true;
+    } else if (wasReadyRef.current) {
+      // State regressed from "ready" — log so we can see it in the error log.
+      reportClientError({
+        context: "state-regression",
+        message: `ready → ${state.kind}${"message" in state ? ": " + state.message : ""}`,
+      });
+    }
+  }, [state]);
 
   if (state.kind === "loading") {
     return <div className="status">Loading episode…</div>;
@@ -324,7 +394,7 @@ export function App(): ReactElement {
 
   return (
     <article className="episode">
-      {webViewMode === "inline" && (
+      {!isExpanded && (
         <button
           className="expand-button"
           onClick={handleExpand}
@@ -485,10 +555,10 @@ export function App(): ReactElement {
         </LinkButton>
         .
       </p>
-      {isMobile && webViewMode === "inline" && hasOverflow && (
+      {!isExpanded && hasOverflow && (
         <div className="overflow-fade" aria-hidden="true" />
       )}
-      {isMobile && webViewMode === "inline" && hasOverflow && (
+      {!isExpanded && hasOverflow && (
         <button
           className="expand-hint"
           onClick={handleExpand}

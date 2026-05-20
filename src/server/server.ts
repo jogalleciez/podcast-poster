@@ -979,16 +979,21 @@ async function createEpisodePost(episode: EpisodeData): Promise<string> {
     throw new Error("subredditName missing from context");
   }
 
-  const [flairIdRaw, flairTextRaw, includePodcastName, shouldSticky] = await Promise.all([
+  const [flairIdRaw, flairTextRaw, includePodcastName, shouldSticky, includeEpisodeNumber] = await Promise.all([
     settings.get<string>("postFlairId"),
     settings.get<string>("postFlairText"),
     settings.get<boolean>("includePodcastNameInTitle"),
     settings.get<boolean>("stickyPost"),
+    settings.get<boolean>("includeEpisodeNumberInTitle"),
   ]);
 
+  const epLabel = episode.episodeDisplay
+    ?? (episode.episodeNumber != null ? String(episode.episodeNumber) : null);
+  const epPrefix = includeEpisodeNumber && epLabel ? `Ep. ${epLabel} - ` : "";
+
   const title = includePodcastName !== false
-    ? `${episode.podcastTitle} - ${episode.episodeTitle}`
-    : episode.episodeTitle;
+    ? `${episode.podcastTitle} - ${epPrefix}${episode.episodeTitle}`
+    : `${epPrefix}${episode.episodeTitle}`;
 
   const flairId = flairIdRaw?.trim() || undefined;
   const flairText = flairTextRaw?.trim() || undefined;
