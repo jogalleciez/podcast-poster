@@ -105,6 +105,17 @@ type FeedConfig = {
   postLinkUrl?: string;
 };
 
+// Some hosts expose multiple domains for the same RSS content; only one is on
+// the Devvit allowlist. Normalize known aliases before building FeedConfig so
+// users can paste any variant they find and it just works.
+//   • Omny Studio: www.omnycontent.com → traffic.omny.fm (same path)
+//   • Buzzsprout:  rss.buzzsprout.com  → feeds.buzzsprout.com (same path)
+function normalizeRssUrl(url: string): string {
+  return url
+    .replace(/^(https?:\/\/)www\.omnycontent\.com(\/)/i, "$1traffic.omny.fm$2")
+    .replace(/^(https?:\/\/)rss\.buzzsprout\.com(\/)/i, "$1feeds.buzzsprout.com$2");
+}
+
 async function getFeeds(): Promise<FeedConfig[]> {
   const feedUrls = (await settings.get<string>("feedUrls")) || "";
   const lines = feedUrls
@@ -115,7 +126,7 @@ async function getFeeds(): Promise<FeedConfig[]> {
   const feeds: FeedConfig[] = [];
   lines.forEach((line, idx) => {
     const parts = line.split("|").map(p => p.trim());
-    const url = parts[0];
+    const url = normalizeRssUrl(parts[0] ?? "");
     const nameOverride = parts[1] || "";
     const postLinkUrl = parts[2] || "";
 

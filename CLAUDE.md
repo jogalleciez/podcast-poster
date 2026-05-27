@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**podcast-poster** is a Reddit Devvit app (`@devvit/web@0.12.22`) that posts episodes from RSS podcast feeds to a subreddit as **custom WebView posts** with a React client. Moderators configure one or more feeds via app settings; a cron job (every 15 minutes) polls feeds and creates posts. Moderators can also pick a feed/episode manually via subreddit menu items.
+**podcast-poster** is a Reddit Devvit app (`@devvit/web@^0.12.24`) that posts episodes from RSS podcast feeds to a subreddit as **custom WebView posts** with a React client. Moderators configure one or more feeds via app settings; a cron job (every 15 minutes) polls feeds and creates posts. Moderators can also pick a feed/episode manually via subreddit menu items.
 
 Note: this branch (`feat/custom-post-webview-client`) migrated away from plain self-posts. AGENTS.md still describes the old server-only/self-post architecture — prefer this file when they disagree.
 
@@ -53,16 +53,30 @@ Routed by exact URL match in `server.ts`:
 ### Redis keys
 - `last_posted_guid:url:{sha1(feed.url).slice(0,12)}` — per-feed last-posted GUID, keyed by a stable URL hash so reordering feeds doesn't lose history. Legacy positional keys (`last_posted_guid:{index}`) are migrated on first read.
 - `post_data:{postId}` — `EpisodeData` payload served to the WebView client. Written at post creation.
-- `spreaker_show:{showId}` — cached Spreaker API JSON (TTL ~50 min). Spreaker feeds use the Spreaker JSON API instead of RSS.
-- Client error log keys (see `onLogClientError` / `onListClientErrors`).
+- `spreaker_show:{showId}` — cached Spreaker latest-episode detail (TTL ~50 min).
+- `spreaker_show_meta:{showId}` — cached Spreaker show metadata (TTL ~50 min).
+- `spreaker_picklist:{showId}:{limit}` — cached Spreaker episode list for the episode picker.
+- `spreaker_episode:{episodeId}` — cached individual Spreaker episode detail.
+- `audioboom_channel_meta:{channelId}` — cached Audioboom channel metadata.
+- `audioboom_channel_clips:{channelId}:{limit}` — cached Audioboom episode list.
+- `audioboom_channel_title:{channelId}` — cached channel title for the feed selector.
+- `client_errors` — JSON array of up to 50 most-recent client error reports (see `onLogClientError` / `onListClientErrors`).
 
 ### Settings (`devvit.json` → `settings.subreddit`)
-`appEnabled`, `feedUrls` (paragraph; `URL | Name | LinkUrl` per line, `#` for comments), `postFlairId`, `postFlairText`, `includePodcastNameInTitle`, `stickyPost`, `listenButtonColor` (accent color applied across the WebView UI), `listenButtonPosition` (`top`/`bottom`), `feedHistoryLimit` (episodes loaded in the episode picker).
+`appEnabled`, `feedUrls` (paragraph; `URL | Name | LinkUrl` per line, `#` for comments), `postFlairId`, `postFlairText`, `includePodcastNameInTitle`, `includeEpisodeNumberInTitle` (prepends `Ep. {N} - ` to the episode title), `stickyPost`, `listenButtonColor` (accent color applied across the WebView UI), `listenButtonPosition` (`top`/`bottom`), `webViewFont` (font key resolved via `FONT_FAMILY_BY_KEY` in `server.ts`; default `reddit`), `feedHistoryLimit` (episodes loaded in the episode picker).
 
 There is **no** `pollingFrequency` / `weeklyPollingDay` setting in this branch — the cron runs every 15 minutes and each feed is checked against its stored last-posted GUID.
 
 ### Feed pipeline
-`getFeeds()` parses `feedUrls` into `FeedConfig[]`. For each feed: fetch RSS (or Spreaker JSON), parse with `fast-xml-parser`, extract GUID/title/description/audio plus Podcasting 2.0 metadata (`<podcast:person>`, `<podcast:funding>`, `<podcast:chapters>`, `<podcast:soundbite>`, `<podcast:season>`, `<podcast:transcript>`), convert HTML to Markdown via `node-html-markdown`, build an `EpisodeData`, submit a custom post with `reddit.submitPost`, then write `post_data:{postId}` and the per-feed GUID. Fetches run in parallel (`Promise.all` / `allSettled`) to stay under Devvit's 30s endpoint timeout.
+`getFeeds()` parses `feedUrls` into `FeedConfig[]`. For each feed: fetch RSS (or Spreaker/Audioboom JSON API — see below), parse with `fast-xml-parser`, extract GUID/title/description/audio plus Podcasting 2.0 metadata (`<podcast:person>`, `<podcast:funding>`, `<podcast:chapters>`, `<podcast:soundbite>`, `<podcast:season>`, `<podcast:transcript>`), convert HTML to Markdown via `node-html-markdown`, strip platform privacy-notice boilerplate via `PRIVACY_PATTERNS` / `stripPrivacyNotices`, build an `EpisodeData`, submit a custom post with `reddit.submitCustomPost`, then write `post_data:{postId}` and the per-feed GUID. Fetches run in parallel (`Promise.all` / `allSettled`) to stay under Devvit's 30s endpoint timeout.
+
+### Non-RSS feed adapters
+Two feeds use JSON APIs instead of RSS, because their RSS domains aren't in Devvit's allowlist or are otherwise unavailable:
+
+- **Spreaker** — detected by `spreaker.com/show/{id}` in the URL. Uses `api.spreaker.com/v2/shows/{id}/episodes` + `/v2/episodes/{id}` + `/v2/shows/{id}` (show meta). Spreaker returns duration in **milliseconds**; the parser divides by 1000 if the value exceeds 86400.
+- **Audioboom** — detected by `audioboom.com/channel(s)/{id}` in the URL. Uses `api.audioboom.com/channels/{id}/audio_clips` + `/channels/{id}` (show meta). Mirrors the Spreaker adapter structure: `fetchAudioboomEpisode`, `fetchAudioboomEpisodes`, and `audioboomClipToEpisode`.
+
+Both adapters cache their API responses in Redis (TTL ~50 min) and expose the same three-function interface (`fetchLatestEpisode` / `fetchEpisodePickList` / `fetchEpisodeByGuid`) so the cron and picker code paths are adapter-agnostic.
 
 ## Constraints
 

@@ -73,7 +73,9 @@
         "cdn.atp.fm",
         "podcasts.files.bbci.co.uk",
         "feeds.megaphone.fm",
-        "api.audioboom.com"
+        "api.audioboom.com",
+        "rss.libsyn.com",
+        "feeds.fastcast.ai"
       ]
     }
   },

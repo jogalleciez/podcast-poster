@@ -99,11 +99,13 @@ The following podcast hosting providers are supported out of the box:
 | **Audioboom** | `api.audioboom.com` ² |
 | **Ausha** | `feed.ausha.co` |
 | **BBC Podcasts** | `podcasts.files.bbci.co.uk` |
-| **Buzzsprout** | `feeds.buzzsprout.com` |
+| **Buzzsprout** | `feeds.buzzsprout.com` ⁴ |
 | **Captivate** | `feeds.captivate.fm` |
+| **Fastcast.ai** | `feeds.fastcast.ai` |
 | **HubHopper** | `rss.hubhopper.com` |
+| **Libsyn** | `rss.libsyn.com` |
 | **Megaphone** | `feeds.megaphone.fm` |
-| **Omny Studio** | `traffic.omny.fm` |
+| **Omny Studio** | `traffic.omny.fm` ³ |
 | **Podbean** | `feed.podbean.com` |
 | **RedCircle** | `feeds.redcircle.com` |
 | **RSS.com** | `media.rss.com` |
@@ -114,6 +116,10 @@ The following podcast hosting providers are supported out of the box:
 > ¹ Enter your `https://www.spreaker.com/show/{id}/episodes/feed` URL as-is — the app automatically fetches episode data through the Spreaker JSON API.
 >
 > ² Audioboom doesn't expose an RSS host that's allowlistable on Devvit. Enter the channel page URL (`https://audioboom.com/channels/{id}`) as-is — the app fetches episodes through the `api.audioboom.com` JSON API.
+>
+> ³ Omny Studio shows `www.omnycontent.com` URLs in their dashboard — these are automatically normalized to `traffic.omny.fm` by the app, so either URL works.
+>
+> ⁴ Buzzsprout RSS feeds are also accessible at `rss.buzzsprout.com` — these are automatically normalized to `feeds.buzzsprout.com` by the app, so either URL works.
 
 Need a different host? Open an [issue](https://github.com/jogalleciez/podcast-poster/issues/new) or [contact the developer](https://www.reddit.com/message/compose/?to=/u/jogalleciez).
 
