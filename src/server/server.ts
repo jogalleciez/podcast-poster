@@ -727,7 +727,11 @@ function parseRssItem(item: RssItem, channel: RssChannel, feed: FeedConfig): Epi
   const rawSubtitle = item["itunes:subtitle"]
     ? stripPrivacyNotices(NodeHtmlMarkdown.translate(item["itunes:subtitle"]).trim()) || undefined
     : undefined;
-  const collapse = (s: string) => s.replace(/\s+/g, " ");
+  // Strip ALL whitespace (not just collapse) before comparing: HTML block
+  // boundaries in content:encoded (<br>, <p>) introduce spaces/newlines that the
+  // plain-text itunes:subtitle lacks (e.g. "2604.This" vs "2604. This"), which
+  // would otherwise defeat substring matching between the two.
+  const stripWs = (s: string) => s.replace(/\s+/g, "");
   // Resolve [text](url) links to just text before stripping other markdown chars,
   // so HTML <a> tags in content:encoded don't break substring matching against
   // plain-text itunes:subtitle (which has no URLs).
@@ -741,11 +745,10 @@ function parseRssItem(item: RssItem, channel: RssChannel, feed: FeedConfig): Epi
     .replace(/[“”„‟]/g, '"')
     .replace(/[–—]/g, "-")
     .replace(/…/g, "...");
-  const norm = (s: string) => normPunct(collapse(stripMd(s)));
+  const norm = (s: string) => normPunct(stripWs(stripMd(s)));
   const subtitleRedundant = rawSubtitle && description && (
-    norm(description).startsWith(norm(rawSubtitle)) ||
-    norm(rawSubtitle).startsWith(norm(description)) ||
-    norm(description).includes(norm(rawSubtitle))
+    norm(description).includes(norm(rawSubtitle)) ||
+    norm(rawSubtitle).includes(norm(description))
   );
   const episodeSubtitle = subtitleRedundant ? undefined : rawSubtitle;
 
@@ -984,13 +987,85 @@ function postDataKey(postId: string): string {
   return `post_data:${postId}`;
 }
 
+// Reddit's community-highlights carousel (up to 6 posts) is only reachable
+// through `AddPostToHighlights`, which Devvit's runtime does not implement
+// (returns gRPC UNIMPLEMENTED). The programmatic option is `post.sticky()`
+// (`SetSubredditSticky`); in practice this subreddit accepts up to 4 sticky
+// slots. New episode posts take slot 1 and previously highlighted posts shift
+// down one slot each (1→2, 2→3, …); anything past the last slot is unstickied.
+// The ordered list of highlighted post IDs (newest first) is tracked in Redis
+// under STICKY_HIGHLIGHTS_KEY.
+const MAX_STICKY_SLOTS = 4;
+const STICKY_HIGHLIGHTS_KEY = "sticky_highlights";
+
+type StickySlot = 1 | 2 | 3 | 4;
+type Post = Awaited<ReturnType<typeof reddit.getPostById>>;
+type PostId = Post["id"];
+
+/** Reads the tracked highlighted post IDs (newest first), tolerating bad data. */
+async function getStickyHighlights(): Promise<PostId[]> {
+  const raw = await redis.get(STICKY_HIGHLIGHTS_KEY);
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (id): id is PostId => typeof id === "string" && id.startsWith("t3_"),
+    );
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Highlights `newPost` at sticky slot 1 and shifts previously highlighted posts
+ * down one slot each. When more than MAX_STICKY_SLOTS posts would be
+ * highlighted, the oldest ones are unstickied. Each kept post is stickied to its
+ * exact slot so the ordering is deterministic. The ordered list of highlighted
+ * post IDs (newest first) is tracked in Redis under STICKY_HIGHLIGHTS_KEY.
+ */
+async function pushStickyHighlight(newPost: Post): Promise<void> {
+  const previous = await getStickyHighlights();
+  // Newest first; drop any stale copy of this post id (e.g. a manual re-post).
+  const ordered: PostId[] = [
+    newPost.id,
+    ...previous.filter((id) => id !== newPost.id),
+  ];
+  const kept = ordered.slice(0, MAX_STICKY_SLOTS);
+  const dropped = ordered.slice(MAX_STICKY_SLOTS);
+
+  // Free the bottom slots first so re-stickying the kept posts can't overflow.
+  for (const id of dropped) {
+    try {
+      const post = await reddit.getPostById(id);
+      await post.unsticky();
+    } catch (e) {
+      console.error(`Failed to unsticky dropped highlight ${id}:`, e);
+    }
+  }
+
+  // Sticky kept posts top-down (slot 1 = newest) so slots fill sequentially.
+  for (let i = 0; i < kept.length; i++) {
+    const id = kept[i]!;
+    const position = (i + 1) as StickySlot;
+    try {
+      const post = id === newPost.id ? newPost : await reddit.getPostById(id);
+      await post.sticky(position);
+    } catch (e) {
+      console.error(`Failed to sticky highlight ${id} at slot ${position}:`, e);
+    }
+  }
+
+  await redis.set(STICKY_HIGHLIGHTS_KEY, JSON.stringify(kept));
+}
+
 async function createEpisodePost(episode: EpisodeData): Promise<string> {
   const subredditName = context.subredditName;
   if (!subredditName) {
     throw new Error("subredditName missing from context");
   }
 
-  const [flairIdRaw, flairTextRaw, includePodcastName, shouldSticky, includeEpisodeNumber] = await Promise.all([
+  const [flairIdRaw, flairTextRaw, includePodcastName, shouldHighlight, includeEpisodeNumber] = await Promise.all([
     settings.get<string>("postFlairId"),
     settings.get<string>("postFlairText"),
     settings.get<boolean>("includePodcastNameInTitle"),
@@ -1012,18 +1087,33 @@ async function createEpisodePost(episode: EpisodeData): Promise<string> {
   const post = await reddit.submitCustomPost({
     subredditName,
     title,
-    ...(flairId ? { flairId, flairText } : {}),
   });
 
   await redis.set(postDataKey(post.id), JSON.stringify(episode));
 
   console.log(`New post created: ${post.url}`);
 
-  if (shouldSticky) {
+  // Apply flair as an explicit step after creation. The inline flairId/flairText
+  // on submitCustomPost is silently dropped for custom posts (e.g. when the flair
+  // template isn't text-editable), whereas setPostFlair surfaces a real error.
+  if (flairId) {
     try {
-      await post.sticky(1);
+      await reddit.setPostFlair({
+        subredditName,
+        postId: post.id,
+        flairTemplateId: flairId,
+        ...(flairText ? { text: flairText } : {}),
+      });
     } catch (e) {
-      console.error("Failed to sticky post (subreddit may already have 2 stickies):", e);
+      console.error(`Failed to apply post flair (template ${flairId}):`, e);
+    }
+  }
+
+  if (shouldHighlight) {
+    try {
+      await pushStickyHighlight(post);
+    } catch (e) {
+      console.error("Failed to update sticky highlights:", e);
     }
   }
 
@@ -1154,11 +1244,8 @@ async function onMenuViewClientErrors(): Promise<UiResponse> {
  * With 2+ feeds: shows a feed selector first, which then opens the episode picker.
  */
 async function onMenuPostLatest(): Promise<UiResponse> {
-  const isEnabled = await settings.get<boolean>("appEnabled");
-  if (isEnabled === false) {
-    return { showToast: { text: "App is disabled in settings.", appearance: "neutral" } };
-  }
-
+  // Manual posting is intentionally independent of `appEnabled` — moderators can
+  // post an episode by hand even when automatic cron posting is turned off.
   const feeds = await getFeeds();
 
   if (feeds.length === 0) {

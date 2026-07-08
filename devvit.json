@@ -119,8 +119,8 @@
       },
       "stickyPost": {
         "type": "boolean",
-        "label": "Sticky (Highlight) New Episode Posts",
-        "helpText": "When enabled, each new episode post is automatically stickied to the top of the subreddit. Note: Reddit allows a maximum of 2 stickied posts at a time.",
+        "label": "Highlight New Episode Posts",
+        "helpText": "When enabled, each new episode post is stickied to the top of the subreddit and previously highlighted posts shift down, keeping up to 4 recent episodes pinned at once. Once all slots are full, the oldest is unstickied.",
         "defaultValue": false
       },
       "listenButtonColor": {

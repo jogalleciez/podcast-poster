@@ -54,7 +54,7 @@ After installing, go to **App Settings** to configure the app.
 | **Post Flair Template ID** | UUID of the flair template to apply to each post (optional) |
 | **Post Flair Text Override** | Custom flair text (only used when a flair template ID is set) |
 | **Include Podcast Name in Post Title** | When on (default), titles are `Podcast Name - Episode Title`. When off, only the episode title is used. |
-| **Sticky (Highlight) New Episode Posts** | When on, each new episode post is auto-stickied. Reddit allows at most 2 stickied posts at a time. |
+| **Highlight New Episode Posts** | When on, each new episode post is stickied to the top and previously highlighted posts shift down, keeping up to 4 recent episodes pinned at once. Once all slots are full, the oldest is unstickied. |
 | **Accent Color** | Optional CSS color (e.g. `#ff5733` or `coral`) applied to buttons, links, and accent elements in the episode card. Defaults to Reddit blue. |
 | **Listen Button Position** | Show the Listen button below the description (default) or above it. |
 | **Feed History Depth** | How many recent episodes to load in the manual episode picker. Higher values let you find older episodes but are slower to load. Default: 50. |

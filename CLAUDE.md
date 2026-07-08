@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**podcast-poster** is a Reddit Devvit app (`@devvit/web@^0.12.24`) that posts episodes from RSS podcast feeds to a subreddit as **custom WebView posts** with a React client. Moderators configure one or more feeds via app settings; a cron job (every 15 minutes) polls feeds and creates posts. Moderators can also pick a feed/episode manually via subreddit menu items.
+**podcast-poster** is a Reddit Devvit app (`@devvit/web@0.13.7`) that posts episodes from RSS podcast feeds to a subreddit as **custom WebView posts** with a React client. Moderators configure one or more feeds via app settings; a cron job (every 15 minutes) polls feeds and creates posts. Moderators can also pick a feed/episode manually via subreddit menu items.
 
 Note: this branch (`feat/custom-post-webview-client`) migrated away from plain self-posts. AGENTS.md still describes the old server-only/self-post architecture — prefer this file when they disagree.
 
@@ -61,9 +61,10 @@ Routed by exact URL match in `server.ts`:
 - `audioboom_channel_clips:{channelId}:{limit}` — cached Audioboom episode list.
 - `audioboom_channel_title:{channelId}` — cached channel title for the feed selector.
 - `client_errors` — JSON array of up to 50 most-recent client error reports (see `onLogClientError` / `onListClientErrors`).
+- `sticky_highlights` — JSON array of currently-highlighted post IDs (newest first, capped at `MAX_STICKY_SLOTS`=4) when `stickyPost` is enabled. Each new post takes sticky slot 1 and shifts the rest down (1→2, 2→3, …); the oldest falls off the end and is unstickied (see `pushStickyHighlight`). Note: Reddit's 6-slot "community highlights" carousel is *not* usable here — its `AddPostToHighlights` RPC returns gRPC UNIMPLEMENTED on Devvit — so this uses `post.sticky()` (`SetSubredditSticky`), which in practice accepts up to 4 subreddit slots.
 
 ### Settings (`devvit.json` → `settings.subreddit`)
-`appEnabled`, `feedUrls` (paragraph; `URL | Name | LinkUrl` per line, `#` for comments), `postFlairId`, `postFlairText`, `includePodcastNameInTitle`, `includeEpisodeNumberInTitle` (prepends `Ep. {N} - ` to the episode title), `stickyPost`, `listenButtonColor` (accent color applied across the WebView UI), `listenButtonPosition` (`top`/`bottom`), `webViewFont` (font key resolved via `FONT_FAMILY_BY_KEY` in `server.ts`; default `reddit`), `feedHistoryLimit` (episodes loaded in the episode picker).
+`appEnabled`, `feedUrls` (paragraph; `URL | Name | LinkUrl` per line, `#` for comments), `postFlairId`, `postFlairText`, `includePodcastNameInTitle`, `includeEpisodeNumberInTitle` (prepends `Ep. {N} - ` to the episode title), `stickyPost` (label "Highlight New Episode Posts"; stickies each new post and shifts older highlights down via `pushStickyHighlight`), `listenButtonColor` (accent color applied across the WebView UI), `listenButtonPosition` (`top`/`bottom`), `webViewFont` (font key resolved via `FONT_FAMILY_BY_KEY` in `server.ts`; default `reddit`), `feedHistoryLimit` (episodes loaded in the episode picker).
 
 There is **no** `pollingFrequency` / `weeklyPollingDay` setting in this branch — the cron runs every 15 minutes and each feed is checked against its stored last-posted GUID.
 
