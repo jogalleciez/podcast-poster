@@ -39,7 +39,13 @@ Debug client errors:
 
 ## Post Format
 
-Posts are custom WebView posts rendered by a React client. The post title is `{Podcast Name} - {Episode Title}` by default (or just `{Episode Title}` when **Include Podcast Name in Post Title** is disabled). The post body shown inside the WebView includes the episode description (HTML converted to Markdown), a Listen button, and a Details tab with episode metadata.
+By default, posts are interactive WebView posts rendered by a React client. The post title is `{Podcast Name} - {Episode Title}` by default (or just `{Episode Title}` when **Include Podcast Name in Post Title** is disabled). The post body shown inside the WebView includes the episode description (HTML converted to Markdown), a Listen button, and a Details tab with episode metadata.
+
+You can change the format with the **Post Type** setting:
+
+- **Interactive post** (default) — the rich in-app player described above.
+- **Self / text post** — a normal text post whose body is the episode description (as Markdown) with a "▶ Listen" link at the top.
+- **Link post** — a link post pointing at the episode page. Reddit doesn't allow text on a link post itself, so the episode description is posted as the first comment (pinned by the app).
 
 ---
 
@@ -50,6 +56,7 @@ After installing, go to **App Settings** to configure the app.
 | Setting | Description |
 |---|---|
 | **App Enabled** | Toggle automatic posting on/off |
+| **Post Type** | How new episodes are posted: **Interactive post** (in-app player, default), **Self / text post** (episode notes as a text post), or **Link post** (links to the episode page, with the notes added as the first comment). |
 | **RSS Feed URLs** | One feed per line. Format: `URL \| Podcast Name \| Link URL`. Example: `https://rss.art19.com/my-podcast \| My Podcast \| https://example.com/listen` |
 | **Post Flair Template ID** | UUID of the flair template to apply to each post (optional) |
 | **Post Flair Text Override** | Custom flair text (only used when a flair template ID is set) |

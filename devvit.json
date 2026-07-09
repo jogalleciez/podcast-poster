@@ -165,6 +165,17 @@
           { "label": "System only (no web font)", "value": "system" }
         ],
         "defaultValue": "reddit"
+      },
+      "postType": {
+        "type": "select",
+        "label": "Post Type",
+        "helpText": "How new episodes are posted. Interactive = the rich in-app player (default). Self = a text post with the episode notes. Link = a link to the episode page with the notes added as the first comment (Reddit can't put text on a link post itself).",
+        "options": [
+          { "label": "Interactive post — in-app player (default)", "value": "custom" },
+          { "label": "Self / text post", "value": "self" },
+          { "label": "Link post", "value": "link" }
+        ],
+        "defaultValue": "custom"
       }
     }
   }

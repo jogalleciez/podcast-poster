@@ -1059,19 +1059,40 @@ async function pushStickyHighlight(newPost: Post): Promise<void> {
   await redis.set(STICKY_HIGHLIGHTS_KEY, JSON.stringify(kept));
 }
 
+// Reddit's selftext limit is ~40k chars; keep a small margin.
+const SELF_POST_MAX_CHARS = 40000;
+
+/**
+ * Builds the Markdown body used for self posts and for the description comment
+ * on link posts. Reuses the already-converted, privacy-stripped `episode.description`
+ * and prepends a "Listen" link to the audio (falling back to the episode page).
+ */
+function buildSelfPostBody(episode: EpisodeData): string {
+  const listenUrl = episode.audioUrl?.trim() || episode.linkUrl?.trim();
+  const listenLine = listenUrl ? `**▶ [Listen](${listenUrl})**\n\n` : "";
+  const body = `${listenLine}${episode.description ?? ""}`.trim();
+  return body.length > SELF_POST_MAX_CHARS
+    ? `${body.slice(0, SELF_POST_MAX_CHARS - 1)}…`
+    : body;
+}
+
 async function createEpisodePost(episode: EpisodeData): Promise<string> {
   const subredditName = context.subredditName;
   if (!subredditName) {
     throw new Error("subredditName missing from context");
   }
 
-  const [flairIdRaw, flairTextRaw, includePodcastName, shouldHighlight, includeEpisodeNumber] = await Promise.all([
+  const [flairIdRaw, flairTextRaw, includePodcastName, shouldHighlight, includeEpisodeNumber, postTypeRaw] = await Promise.all([
     settings.get<string>("postFlairId"),
     settings.get<string>("postFlairText"),
     settings.get<boolean>("includePodcastNameInTitle"),
     settings.get<boolean>("stickyPost"),
     settings.get<boolean>("includeEpisodeNumberInTitle"),
+    settings.get<string>("postType"),
   ]);
+
+  // Devvit select settings may return an array (e.g. ["self"]) or a string.
+  const postType = (Array.isArray(postTypeRaw) ? (postTypeRaw as string[])[0] : postTypeRaw) ?? "custom";
 
   const epLabel = episode.episodeDisplay
     ?? (episode.episodeNumber != null ? String(episode.episodeNumber) : null);
@@ -1084,14 +1105,35 @@ async function createEpisodePost(episode: EpisodeData): Promise<string> {
   const flairId = flairIdRaw?.trim() || undefined;
   const flairText = flairTextRaw?.trim() || undefined;
 
-  const post = await reddit.submitCustomPost({
-    subredditName,
-    title,
-  });
+  let post: Post;
+  if (postType === "self") {
+    post = await reddit.submitPost({
+      subredditName,
+      title,
+      text: buildSelfPostBody(episode),
+    });
+  } else if (postType === "link") {
+    // Link posts can't carry a body, so post the description as the first comment.
+    const url = episode.postLinkUrl?.trim() || episode.linkUrl?.trim();
+    if (url) {
+      post = await reddit.submitPost({ subredditName, title, url });
+      try {
+        const comment = await reddit.submitComment({ id: post.id, text: buildSelfPostBody(episode) });
+        await comment.distinguish(true); // sticky the mod comment; no-op if the app lacks perms
+      } catch (e) {
+        console.error("Failed to add episode description comment:", e);
+      }
+    } else {
+      // No episode/page URL available — fall back to a self post rather than submit an empty link.
+      post = await reddit.submitPost({ subredditName, title, text: buildSelfPostBody(episode) });
+    }
+  } else {
+    post = await reddit.submitCustomPost({ subredditName, title });
+    // Only interactive posts render client-side from Redis; self/link posts have no WebView.
+    await redis.set(postDataKey(post.id), JSON.stringify(episode));
+  }
 
-  await redis.set(postDataKey(post.id), JSON.stringify(episode));
-
-  console.log(`New post created: ${post.url}`);
+  console.log(`New post created (${postType}): ${post.url}`);
 
   // Apply flair as an explicit step after creation. The inline flairId/flairText
   // on submitCustomPost is silently dropped for custom posts (e.g. when the flair
