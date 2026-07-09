@@ -1073,7 +1073,7 @@ function buildSelfPostBody(episode: EpisodeData, listenPosition: "top" | "bottom
   const description = episode.description ?? "";
   let body = description;
   if (listenUrl) {
-    const listenHeading = `# ▶ [Listen to this Episode](${listenUrl})`;
+    const listenHeading = `# [Listen to this Episode](${listenUrl})`;
     body = listenPosition === "top"
       ? `${listenHeading}\n\n${description}`
       : `${description}\n\n${listenHeading}`;

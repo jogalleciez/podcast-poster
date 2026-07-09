@@ -74,7 +74,7 @@ There is **no** `pollingFrequency` / `weeklyPollingDay` setting in this branch â
 ### Post types (`createEpisodePost`)
 Both the cron and manual-picker paths funnel through `createEpisodePost()`, which branches on the `postType` setting:
 - **`custom`** (default): `reddit.submitCustomPost` + writes `post_data:{postId}` so the React WebView client can render it. This is the only path that populates `post_data:`/`GET /api/post-data`.
-- **`self`**: `reddit.submitPost({ text })` with a Markdown body from `buildSelfPostBody(episode, listenPosition)` (a large "â–¶ Listen to this Episode" heading link + `episode.description`, ordered by the `listenButtonPosition` setting). No WebView, no `post_data:` write.
+- **`self`**: `reddit.submitPost({ text })` with a Markdown body from `buildSelfPostBody(episode, listenPosition)` (a large "Listen to this Episode" heading link + `episode.description`, ordered by the `listenButtonPosition` setting). No WebView, no `post_data:` write.
 - **`link`**: `reddit.submitPost({ url })` pointing at `episode.postLinkUrl || episode.linkUrl`. Reddit link posts can't carry a body, so the same `buildSelfPostBody` Markdown is posted as a distinguished/stickied first comment via `reddit.submitComment` (best-effort). Falls back to a self post if no URL is available.
 
 Flair (`reddit.setPostFlair`) and sticky-highlight (`pushStickyHighlight`) run after creation and are post-type-agnostic.

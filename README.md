@@ -44,7 +44,7 @@ By default, posts are interactive WebView posts rendered by a React client. The 
 You can change the format with the **Post Type** setting:
 
 - **Interactive post** (default) — the rich in-app player described above.
-- **Self / text post** — a normal text post whose body is the episode description (as Markdown) with a large "▶ Listen to this Episode" link placed above or below the description per the **Listen Button Position** setting.
+- **Self / text post** — a normal text post whose body is the episode description (as Markdown) with a large "Listen to this Episode" link placed above or below the description per the **Listen Button Position** setting.
 - **Link post** — a link post pointing at the episode page. Reddit doesn't allow text on a link post itself, so the episode description is posted as the first comment (pinned by the app).
 
 ---
