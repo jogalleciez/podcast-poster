@@ -1065,12 +1065,20 @@ const SELF_POST_MAX_CHARS = 40000;
 /**
  * Builds the Markdown body used for self posts and for the description comment
  * on link posts. Reuses the already-converted, privacy-stripped `episode.description`
- * and prepends a "Listen" link to the audio (falling back to the episode page).
+ * and adds a large "Listen to this Episode" link to the audio (falling back to the
+ * episode page), placed above or below the description per `listenPosition`.
  */
-function buildSelfPostBody(episode: EpisodeData): string {
+function buildSelfPostBody(episode: EpisodeData, listenPosition: "top" | "bottom" = "bottom"): string {
   const listenUrl = episode.audioUrl?.trim() || episode.linkUrl?.trim();
-  const listenLine = listenUrl ? `**▶ [Listen](${listenUrl})**\n\n` : "";
-  const body = `${listenLine}${episode.description ?? ""}`.trim();
+  const description = episode.description ?? "";
+  let body = description;
+  if (listenUrl) {
+    const listenHeading = `# ▶ [Listen to this Episode](${listenUrl})`;
+    body = listenPosition === "top"
+      ? `${listenHeading}\n\n${description}`
+      : `${description}\n\n${listenHeading}`;
+  }
+  body = body.trim();
   return body.length > SELF_POST_MAX_CHARS
     ? `${body.slice(0, SELF_POST_MAX_CHARS - 1)}…`
     : body;
@@ -1082,17 +1090,22 @@ async function createEpisodePost(episode: EpisodeData): Promise<string> {
     throw new Error("subredditName missing from context");
   }
 
-  const [flairIdRaw, flairTextRaw, includePodcastName, shouldHighlight, includeEpisodeNumber, postTypeRaw] = await Promise.all([
+  const [flairIdRaw, flairTextRaw, includePodcastName, shouldHighlight, includeEpisodeNumber, postTypeRaw, listenPositionRaw] = await Promise.all([
     settings.get<string>("postFlairId"),
     settings.get<string>("postFlairText"),
     settings.get<boolean>("includePodcastNameInTitle"),
     settings.get<boolean>("stickyPost"),
     settings.get<boolean>("includeEpisodeNumberInTitle"),
     settings.get<string>("postType"),
+    settings.get<string>("listenButtonPosition"),
   ]);
 
   // Devvit select settings may return an array (e.g. ["self"]) or a string.
   const postType = (Array.isArray(postTypeRaw) ? (postTypeRaw as string[])[0] : postTypeRaw) ?? "custom";
+  const listenPosition =
+    (Array.isArray(listenPositionRaw) ? (listenPositionRaw as string[])[0] : listenPositionRaw) === "top"
+      ? "top"
+      : "bottom";
 
   const epLabel = episode.episodeDisplay
     ?? (episode.episodeNumber != null ? String(episode.episodeNumber) : null);
@@ -1110,7 +1123,7 @@ async function createEpisodePost(episode: EpisodeData): Promise<string> {
     post = await reddit.submitPost({
       subredditName,
       title,
-      text: buildSelfPostBody(episode),
+      text: buildSelfPostBody(episode, listenPosition),
     });
   } else if (postType === "link") {
     // Link posts can't carry a body, so post the description as the first comment.
@@ -1118,14 +1131,14 @@ async function createEpisodePost(episode: EpisodeData): Promise<string> {
     if (url) {
       post = await reddit.submitPost({ subredditName, title, url });
       try {
-        const comment = await reddit.submitComment({ id: post.id, text: buildSelfPostBody(episode) });
+        const comment = await reddit.submitComment({ id: post.id, text: buildSelfPostBody(episode, listenPosition) });
         await comment.distinguish(true); // sticky the mod comment; no-op if the app lacks perms
       } catch (e) {
         console.error("Failed to add episode description comment:", e);
       }
     } else {
       // No episode/page URL available — fall back to a self post rather than submit an empty link.
-      post = await reddit.submitPost({ subredditName, title, text: buildSelfPostBody(episode) });
+      post = await reddit.submitPost({ subredditName, title, text: buildSelfPostBody(episode, listenPosition) });
     }
   } else {
     post = await reddit.submitCustomPost({ subredditName, title });
