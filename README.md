@@ -8,10 +8,12 @@ A [Devvit](https://developers.reddit.com) app that automatically creates Reddit 
 
 - **Automatic RSS polling** — a background cron job checks every 15 minutes and posts any new episode it finds
 - **Manual post trigger** — moderators can pick a feed and a specific episode to post from the subreddit menu
-- **Custom episode card** — every post renders as a React WebView with description, metadata, and an accent-colored Listen button
+- **Three post formats** — interactive episode card (default), self/text post, or link post, set globally or per post
+- **Custom episode card** — interactive posts render as a React WebView with description, metadata, and an accent-colored Listen button
 - **Podcasting 2.0 metadata** — surfaces `<podcast:person>`, `<podcast:funding>`, `<podcast:chapters>`, `<podcast:soundbite>`, `<podcast:transcript>`, and season info when feeds provide it
-- **Flair, sticky, and title customization** — optional flair template/text, auto-sticky, and a toggle for whether the podcast name is included in the post title
-- **Configurable accent color** — applied across buttons, links, and other accent elements in the episode card
+- **Flair, sticky, and title customization** — optional flair template/text, auto-highlight, and toggles for the podcast name and episode number in the post title
+- **Configurable accent color and font** — applied across buttons, links, and other elements in the episode card
+- **No backlog on enable** — turning the app on records where each feed stands instead of dumping old episodes
 - **Duplicate prevention** — tracks the last-posted episode GUID per feed in Redis (keyed by URL hash, so reordering feeds is safe)
 
 ---
@@ -20,20 +22,21 @@ A [Devvit](https://developers.reddit.com) app that automatically creates Reddit 
 
 ### Automatic (Cron)
 
-The app runs a background check every 15 minutes. For each configured feed it fetches the RSS (or the Spreaker JSON API for Spreaker shows), compares the most recent episode's GUID against the last-posted GUID stored in Redis, and posts the episode if it's new.
+The app runs a background check every 15 minutes. For each configured feed it fetches the RSS (or the Spreaker/Audioboom JSON API for those hosts), compares the most recent episode's GUID against the last-posted GUID stored in Redis, and posts the episode if it's new.
+
+**No backlog on install or enable.** The first check after installing — and the first check after switching **App Enabled** back on — quietly records where each feed currently stands instead of posting. That way turning the app on never floods your subreddit with a backlog. Only episodes published *after* that point get posted, which also means episodes released while the app was switched off are skipped rather than posted late.
 
 ### Manual (Moderator Menu)
 
 Post an episode on demand:
 > Subreddit three-dot menu → **"Post an episode"**
 
-You'll be prompted to pick one of your configured feeds, then to pick a specific episode from that feed's recent history. The depth of the episode picker is controlled by the **Feed History Depth** setting.
+You'll be prompted to pick one of your configured feeds (skipped if you only have one), then to pick a specific episode from that feed's recent history. The depth of the episode picker is controlled by the **Feed History Depth** setting.
+
+The episode picker also has a **Post type** dropdown, pre-set to your **Post Type** setting. Changing it affects only that one post — your saved setting stays as it is.
 
 Open settings:
 > Subreddit three-dot menu → **"Configure Podcast Poster"**
-
-Debug client errors:
-> Subreddit three-dot menu → **"View client errors (debug)"** — shows recent errors reported by the WebView client.
 
 ---
 
@@ -45,7 +48,9 @@ You can change the format with the **Post Type** setting:
 
 - **Interactive post** (default) — the rich in-app player described above.
 - **Self / text post** — a normal text post whose body is the episode description (as Markdown) with a large "Listen to this Episode" link placed above or below the description per the **Listen Button Position** setting.
-- **Link post** — a link post pointing at the episode page. Reddit doesn't allow text on a link post itself, so the episode description is posted as the first comment (pinned by the app).
+- **Link post** — a link post pointing at the episode page (or the audio file, if the feed doesn't provide an episode page). Reddit doesn't allow text on a link post itself, so the episode description is posted as the first comment (pinned by the app).
+
+This setting applies to automatic posts. When posting manually, you can pick a different type for that one post without changing the setting.
 
 ---
 
@@ -61,9 +66,11 @@ After installing, go to **App Settings** to configure the app.
 | **Post Flair Template ID** | UUID of the flair template to apply to each post (optional) |
 | **Post Flair Text Override** | Custom flair text (only used when a flair template ID is set) |
 | **Include Podcast Name in Post Title** | When on (default), titles are `Podcast Name - Episode Title`. When off, only the episode title is used. |
-| **Highlight New Episode Posts** | When on, each new episode post is stickied to the top and previously highlighted posts shift down, keeping up to 4 recent episodes pinned at once. Once all slots are full, the oldest is unstickied. |
+| **Include Episode Number in Post Title** | When on, prepends the episode number: `My Podcast - Ep. 42 - Great Interview`. Feeds that don't publish an episode number fall back to the normal title. Off by default. |
+| **Highlight New Episode Posts** | When on, each new episode post is stickied to the top and the previous highlight shifts down, keeping up to 2 recent episodes pinned at once (Reddit's per-subreddit sticky limit). Once both slots are full, the older one is unstickied. |
 | **Accent Color** | Optional CSS color (e.g. `#ff5733` or `coral`) applied to buttons, links, and accent elements in the episode card. Defaults to Reddit blue. |
 | **Listen Button Position** | Show the Listen button below the description (default) or above it. |
+| **Post Font** | Font used in interactive posts: System / Reddit (default), Figtree, Inter, IBM Plex Sans, Merriweather, Atkinson Hyperlegible, or system-only (no web font). Applies to existing posts too — no need to re-post. |
 | **Feed History Depth** | How many recent episodes to load in the manual episode picker. Higher values let you find older episodes but are slower to load. Default: 50. |
 
 > **Don't know your podcast's RSS feed URL?** Search for the show at [podcastindex.org](https://podcastindex.org) — the RSS feed URL is listed on every show's page. Copy it and paste it into the **RSS Feed URLs** setting.
@@ -136,7 +143,7 @@ Need a different host? Open an [issue](https://github.com/jogalleciez/podcast-po
 
 | Component | Technology |
 |---|---|
-| Platform | [Devvit Web](https://developers.reddit.com/docs/capabilities/devvit-web/devvit_web_overview) v0.12.22 |
+| Platform | [Devvit Web](https://developers.reddit.com/docs/capabilities/devvit-web/devvit_web_overview) v0.13.8 |
 | Language | TypeScript 5.x / Node.js ≥ 22.6 |
 | Frontend | React 19 + `react-markdown` (episode card UI) |
 | RSS Parsing | [`fast-xml-parser`](https://github.com/NaturalIntelligence/fast-xml-parser) |
@@ -150,42 +157,10 @@ Need a different host? Open an [issue](https://github.com/jogalleciez/podcast-po
 
 - Only the **most recent** entry in the RSS feed is posted per check cycle.
 - Only podcast hosts in the **Supported RSS Feed Hosts** section above are supported — Devvit requires all external domains to be [pre-approved](https://developers.reddit.com/docs/capabilities/server/http-fetch-policy). Hosts not on the list will fail silently at fetch time.
+- Episodes released while **App Enabled** is off are skipped, not caught up later (see "No backlog on install or enable" above).
+- Manually posting an *older* episode moves that feed's "last posted" marker to it, so the next automatic check will post the current newest episode.
+- Reddit allows only **2** pinned posts per subreddit, so **Highlight New Episode Posts** keeps at most 2 episodes pinned at a time.
 - **Legacy posts** created before the React UI was introduced will continue to render as plain Reddit text posts. Reddit does not allow changing a post's type after creation, so only posts created from this version onward will display the custom episode card.
-
----
-
-## Changelog
-
-A reverse-chronological summary of what's changed in Pod Poster. Most recent updates first.
-
-### Latest — Custom episode cards
-
-- **Accent color everywhere.** The Accent Color setting now styles buttons, links, headers, and every other accent inside the episode card — not just the Listen button.
-- **Podcasting 2.0 support.** Posts now show host and guest info, funding/support links, chapters, soundbites, transcripts, and season/episode numbers when the feed provides them.
-- **Built-in error reporting.** A new "View client errors (debug)" menu lets moderators see any issues the in-post UI runs into, making it easier to report problems.
-- **Custom episode card UI.** Pod Poster posts are now interactive episode cards (with description, metadata, and a Listen button) instead of plain Reddit text posts. Posts created before this change stay as text posts — Reddit doesn't allow changing a post's type after creation.
-- **Devvit platform update.** Upgraded to the latest Devvit platform release.
-
-### Earlier this year — More podcast hosts and post controls
-
-- **Audioboom support.** Audioboom-hosted podcasts now work. Paste the channel page URL (`https://audioboom.com/channels/{id}`) into RSS Feed URLs.
-- **Auto-sticky new episodes.** A new **Sticky (Highlight) New Episode Posts** setting will automatically pin each new episode to the top of your subreddit (Reddit allows up to 2 pinned posts at a time).
-- **Title customization.** A new **Include Podcast Name in Post Title** setting lets you choose between titles like `My Podcast - Episode 42` or just `Episode 42`. On by default.
-- **Cleaner feed picker.** When manually posting, the feed picker now shows the actual podcast name pulled from each feed instead of just the URL.
-- **Pod Poster branding and polished posts.** Posts now include a small "Posted by Pod Poster" footer, and common privacy/disclosure boilerplate that some podcast feeds inject into descriptions is automatically stripped out.
-
-### Mid-year — Spreaker support and smarter listen links
-
-- **Spreaker support.** Spreaker-hosted podcasts now work. Paste your `https://www.spreaker.com/show/{id}/episodes/feed` URL and the app handles the rest behind the scenes.
-- **Smarter Listen button.** The Listen button now opens the episode's landing page from the RSS feed by default, falling back to the audio file only if no landing page is provided. You can still override this per-feed using the optional Link URL.
-- **Expanded supported hosts.** Added support for more podcast hosting providers and removed a few that couldn't be approved on Devvit.
-
-### Early on — Multi-feed and manual posting
-
-- **Manual "Edit Post Body" menu** *(retired with the custom-card update)* — moderators could rewrite the text of an existing episode post. Removed in the move to custom episode cards, since post content is now rendered by the in-post UI.
-- **Unlimited feeds in one setting.** Consolidated the per-feed settings into a single multi-line **RSS Feed URLs** box so you can configure as many podcasts as you like, one per line.
-- **Multi-feed support.** Pod Poster can manage more than one podcast at a time, with custom names per feed and independent "last posted" tracking so feeds don't interfere with each other.
-- **Initial release.** Automatic posting of the latest episode from a single RSS feed, plus a moderator menu to post on demand.
 
 ---
 

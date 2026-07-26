@@ -11,6 +11,8 @@ import { ApiEndpoint, type ClientErrorReport, type DisplaySettings, type Episode
 import { XMLParser } from "fast-xml-parser";
 
 import { NodeHtmlMarkdown } from "node-html-markdown";
+import { clampListNesting } from "./markdown.ts";
+import { decideCronAction } from "./cron-policy.ts";
 
 // ---------------------------------------------------------------------------
 // HTTP entry point
@@ -918,6 +920,11 @@ async function showEpisodePicker(feed: FeedConfig, limit: number): Promise<UiRes
 
   const hash = feedUrlHash(feed.url);
 
+  // Pre-select the picker's post-type dropdown to the global setting; a mod can
+  // override it per post without touching app settings.
+  const postTypeRaw = await settings.get<string>("postType");
+  const defaultPostType = (Array.isArray(postTypeRaw) ? (postTypeRaw as string[])[0] : postTypeRaw) ?? "custom";
+
   return {
     showForm: {
       name: "selectEpisodeForm",
@@ -933,6 +940,18 @@ async function showEpisodePicker(feed: FeedConfig, limit: number): Promise<UiRes
               label: formatEpisodeOptionLabel(it),
               value: `${hash}|${it.guid}`,
             })),
+          },
+          {
+            type: "select",
+            name: "postTypeOverride",
+            label: "Post type",
+            required: true,
+            defaultValue: [defaultPostType],
+            options: [
+              { label: "Interactive post — in-app player", value: "custom" },
+              { label: "Self / text post", value: "self" },
+              { label: "Link post", value: "link" },
+            ],
           },
         ],
       },
@@ -990,15 +1009,16 @@ function postDataKey(postId: string): string {
 // Reddit's community-highlights carousel (up to 6 posts) is only reachable
 // through `AddPostToHighlights`, which Devvit's runtime does not implement
 // (returns gRPC UNIMPLEMENTED). The programmatic option is `post.sticky()`
-// (`SetSubredditSticky`); in practice this subreddit accepts up to 4 sticky
-// slots. New episode posts take slot 1 and previously highlighted posts shift
-// down one slot each (1→2, 2→3, …); anything past the last slot is unstickied.
-// The ordered list of highlighted post IDs (newest first) is tracked in Redis
-// under STICKY_HIGHLIGHTS_KEY.
-const MAX_STICKY_SLOTS = 4;
+// (`SetSubredditSticky`). Although its type accepts positions 1–4, Reddit only
+// supports TWO sticky slots per subreddit — `post.sticky(3)`/`(4)` fail with
+// `400 Bad Request`. So new episode posts take slot 1 and the one previous
+// highlight shifts to slot 2 (1→2); anything past slot 2 is unstickied. The
+// ordered list of highlighted post IDs (newest first) is tracked in Redis under
+// STICKY_HIGHLIGHTS_KEY.
+const MAX_STICKY_SLOTS = 2;
 const STICKY_HIGHLIGHTS_KEY = "sticky_highlights";
 
-type StickySlot = 1 | 2 | 3 | 4;
+type StickySlot = 1 | 2;
 type Post = Awaited<ReturnType<typeof reddit.getPostById>>;
 type PostId = Post["id"];
 
@@ -1078,13 +1098,15 @@ function buildSelfPostBody(episode: EpisodeData, listenPosition: "top" | "bottom
       ? `${listenHeading}\n\n${description}`
       : `${description}\n\n${listenHeading}`;
   }
-  body = body.trim();
+  // Reddit converts self/link post Markdown to RTJSON, which rejects list items
+  // nested more than two tiers deep. Podcast notes often nest deeper, so flatten.
+  body = clampListNesting(body.trim());
   return body.length > SELF_POST_MAX_CHARS
     ? `${body.slice(0, SELF_POST_MAX_CHARS - 1)}…`
     : body;
 }
 
-async function createEpisodePost(episode: EpisodeData): Promise<string> {
+async function createEpisodePost(episode: EpisodeData, postTypeOverride?: string): Promise<{ url: string; permalink: string }> {
   const subredditName = context.subredditName;
   if (!subredditName) {
     throw new Error("subredditName missing from context");
@@ -1101,7 +1123,11 @@ async function createEpisodePost(episode: EpisodeData): Promise<string> {
   ]);
 
   // Devvit select settings may return an array (e.g. ["self"]) or a string.
-  const postType = (Array.isArray(postTypeRaw) ? (postTypeRaw as string[])[0] : postTypeRaw) ?? "custom";
+  const settingPostType = (Array.isArray(postTypeRaw) ? (postTypeRaw as string[])[0] : postTypeRaw) ?? "custom";
+  // A manual post can override the global setting for that one post.
+  const postType = (postTypeOverride === "custom" || postTypeOverride === "self" || postTypeOverride === "link")
+    ? postTypeOverride
+    : settingPostType;
   const listenPosition =
     (Array.isArray(listenPositionRaw) ? (listenPositionRaw as string[])[0] : listenPositionRaw) === "top"
       ? "top"
@@ -1127,7 +1153,9 @@ async function createEpisodePost(episode: EpisodeData): Promise<string> {
     });
   } else if (postType === "link") {
     // Link posts can't carry a body, so post the description as the first comment.
-    const url = episode.postLinkUrl?.trim() || episode.linkUrl?.trim();
+    // Some feeds (e.g. Megaphone) omit a per-item <link>, leaving linkUrl empty; fall
+    // back to the audio enclosure so the post stays a link post instead of a self post.
+    const url = episode.postLinkUrl?.trim() || episode.linkUrl?.trim() || episode.audioUrl?.trim();
     if (url) {
       post = await reddit.submitPost({ subredditName, title, url });
       try {
@@ -1137,7 +1165,7 @@ async function createEpisodePost(episode: EpisodeData): Promise<string> {
         console.error("Failed to add episode description comment:", e);
       }
     } else {
-      // No episode/page URL available — fall back to a self post rather than submit an empty link.
+      // No page or audio URL available at all — fall back to a self post rather than submit an empty link.
       post = await reddit.submitPost({ subredditName, title, text: buildSelfPostBody(episode, listenPosition) });
     }
   } else {
@@ -1172,7 +1200,12 @@ async function createEpisodePost(episode: EpisodeData): Promise<string> {
     }
   }
 
-  return post.url;
+  // Return both url and permalink so the caller's `navigateTo` lands on the
+  // Reddit comments page. For link posts `post.url` is the *external* episode
+  // URL; passing only that makes the client show the external-link
+  // confirmation dialog instead of opening the post. Devvit's navigation
+  // resolver uses `permalink` when `url` isn't the comments page.
+  return { url: post.url, permalink: post.permalink };
 }
 
 // ---------------------------------------------------------------------------
@@ -1363,7 +1396,7 @@ async function onFormSelectFeedSubmit(req: IncomingMessage): Promise<UiResponse>
 
 /** Form submit → posts the chosen individual episode. */
 async function onFormSelectEpisodeSubmit(req: IncomingMessage): Promise<UiResponse> {
-  const { episodePick } = await readBody<{ episodePick: string[] }>(req);
+  const { episodePick, postTypeOverride } = await readBody<{ episodePick: string[]; postTypeOverride?: string[] }>(req);
   const raw = episodePick?.[0];
   if (!raw) {
     return { showToast: { text: "No episode selected.", appearance: "neutral" } };
@@ -1388,11 +1421,11 @@ async function onFormSelectEpisodeSubmit(req: IncomingMessage): Promise<UiRespon
     if (!episode) {
       return { showToast: { text: "Episode not found in feed.", appearance: "neutral" } };
     }
-    const postUrl = await createEpisodePost(episode);
+    const post = await createEpisodePost(episode, postTypeOverride?.[0]);
     await redis.set(feedRedisKey(feed), episode.guid);
     return {
       showToast: { text: `Posted: ${episode.episodeTitle}`, appearance: "success" },
-      navigateTo: postUrl,
+      navigateTo: post,
     };
   } catch (e) {
     console.error(`Failed to post selected episode (feed ${feed.index}):`, e);
@@ -1423,15 +1456,53 @@ async function checkOneFeed(feed: FeedConfig): Promise<void> {
   }
 }
 
+// Tracks whether the app was enabled on the previous cron run, so we can detect
+// the disabled→enabled transition (and first run after install) and seed feed
+// baselines instead of dumping every feed's latest episode as a backlog.
+const APP_ENABLED_STATE_KEY = "app_enabled_state";
+
+/**
+ * Records each feed's current latest-episode GUID as its baseline *without*
+ * posting. Establishes the last-posted marker so the next cron run only posts
+ * episodes published after the app was enabled. Runs on the enable transition.
+ */
+async function seedFeedBaselines(feeds: FeedConfig[]): Promise<void> {
+  await Promise.all(
+    feeds.map(async (feed) => {
+      try {
+        const episode = await fetchLatestEpisode(feed);
+        if (episode) await redis.set(feedRedisKey(feed), episode.guid);
+      } catch (error) {
+        console.error(`Error seeding baseline for feed ${feed.index}:`, error);
+      }
+    }),
+  );
+}
+
 /** Scheduler cron (every 15 min) → posts any new episodes found across all feeds. */
 async function onCheckRSS(): Promise<TaskResponse> {
-  const isEnabled = await settings.get<boolean>("appEnabled");
-  if (isEnabled === false) {
+  // Treat an unset setting as enabled (matches the `defaultValue: true` schema).
+  const isEnabled = (await settings.get<boolean>("appEnabled")) !== false;
+  const prevState = await redis.get(APP_ENABLED_STATE_KEY);
+  const action = decideCronAction(isEnabled, prevState ?? null);
+
+  if (action === "disabled") {
+    await redis.set(APP_ENABLED_STATE_KEY, "false");
     console.log("Podcast poster is disabled in settings.");
     return { status: "ok" };
   }
 
   const feeds = await getFeeds();
+
+  if (action === "seed") {
+    // Enabling the app (or first run after install) must not post a backlog.
+    // Baseline every feed to its current latest episode and post nothing.
+    await seedFeedBaselines(feeds);
+    await redis.set(APP_ENABLED_STATE_KEY, "true");
+    console.log(`App enabled: seeded ${feeds.length} feed baseline(s); no backlog posted.`);
+    return { status: "ok" };
+  }
+
   if (feeds.length === 0) return { status: "ok" };
 
   await Promise.all(feeds.map(checkOneFeed));
