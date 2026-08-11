@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**podcast-poster** is a Reddit Devvit app (`@devvit/web@0.13.8`) that posts episodes from RSS podcast feeds to a subreddit. By default posts are **custom WebView posts** rendered by a React client, but the `postType` setting can switch them to self or link posts. Moderators configure one or more feeds via app settings; a cron job (every 15 minutes) polls feeds and creates posts. Moderators can also pick a feed/episode manually via a subreddit menu item.
+**podcast-poster** is a Reddit Devvit app (`@devvit/web@0.14.0`) that posts episodes from RSS podcast feeds to a subreddit. By default posts are **custom WebView posts** rendered by a React client, but the `postType` setting can switch them to self or link posts. Moderators configure one or more feeds via app settings; a cron job (every 15 minutes) polls feeds and creates posts. Moderators can also pick a feed/episode manually via a subreddit menu item.
 
 Note: the app migrated away from plain self-posts as the only format. AGENTS.md still describes the old server-only/self-post architecture (and claims `src/client/` is empty) — prefer this file when they disagree.
 

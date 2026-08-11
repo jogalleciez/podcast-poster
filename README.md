@@ -143,7 +143,7 @@ Need a different host? Open an [issue](https://github.com/jogalleciez/podcast-po
 
 | Component | Technology |
 |---|---|
-| Platform | [Devvit Web](https://developers.reddit.com/docs/capabilities/devvit-web/devvit_web_overview) v0.13.8 |
+| Platform | [Devvit Web](https://developers.reddit.com/docs/capabilities/devvit-web/devvit_web_overview) v0.14.0 |
 | Language | TypeScript 5.x / Node.js ≥ 22.6 |
 | Frontend | React 19 + `react-markdown` (episode card UI) |
 | RSS Parsing | [`fast-xml-parser`](https://github.com/NaturalIntelligence/fast-xml-parser) |
