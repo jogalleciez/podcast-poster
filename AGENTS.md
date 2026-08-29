@@ -4,14 +4,13 @@ This document provides operational guidelines, commands, and code style rules fo
 
 ## Project Overview
 
-This is a Reddit Devvit application (v0.12.20) built with TypeScript and Node.js (v22.6.0+). The app automatically posts the latest episodes from one or more RSS podcast feeds to a subreddit as standard Reddit self-posts. Moderators configure feeds via app settings; the app polls RSS feeds on a schedule and creates text posts with the episode title, description (HTML converted to Markdown), and a listen link.
+This is a Reddit Devvit application (`@devvit/web@0.14.0`) built with TypeScript and Node.js (v22.6.0+). The app automatically posts the latest episodes from one or more RSS podcast feeds to a subreddit. By default it creates **custom WebView posts** rendered by a React client; the `postType` setting can switch them to self or link posts instead. Moderators configure feeds via app settings; a cron job polls feeds every 15 minutes and creates posts, and a subreddit menu item allows posting a chosen episode manually.
 
 ### Directory Structure
-- `src/server/`: Backend execution context (HTTP request routing, RSS fetching, Reddit post creation, Redis state management). This is the only active source directory.
-- `src/shared/`: Shared types, constants, and API endpoint definitions used by the server.
-- `src/client/`: **Empty / legacy.** Previously housed the webview frontend for an embedded podcast player. The webview was removed; posts are now plain self-posts.
+- `src/server/`: Backend execution context (HTTP request routing, RSS fetching, Reddit post creation, Redis state management). `server.ts` holds the router and every handler; `cron-policy.ts` and `markdown.ts` are pure helpers split out so they can be unit-tested outside the Devvit runtime.
+- `src/shared/`: Shared types, constants, and API endpoint definitions used by both server and client.
+- `src/client/`: React 19 WebView client rendered inside the Reddit post. `index.tsx` mounts `App.tsx`, which fetches from `/api/post-data` and renders with `react-markdown` + `remark-gfm`. Static assets (`index.html`, `styles.css`, `fonts/`) are copied into `dist/client/` by the build.
 - `tools/`: Build scripts (`build.ts`) and modular TypeScript configuration files.
-- `public/`: Contains a compiled `splash.js` artifact (legacy from the removed webview). The active build does not produce client bundles.
 
 ---
 
@@ -20,9 +19,9 @@ This is a Reddit Devvit application (v0.12.20) built with TypeScript and Node.js
 ### Build and Deployment
 Always ensure the build and type-checks succeed before pushing code or creating a pull request.
 - **Build Project:** `npm run build`
-  Runs the custom esbuild script (`tools/build.ts`) with `--minify` to bundle the server into `dist/server/index.js` (CommonJS). The build only bundles the server; there is no active client bundle step.
+  Runs the custom esbuild script (`tools/build.ts`) with `--minify`. It bundles the server into `dist/server/index.js` (CommonJS) and the client into `dist/client/` (ESM browser bundle) in parallel.
 - **Type Check:** `npm run type-check`
-  Runs `tsc --build` across the TypeScript project references (server, shared). Never skip this step.
+  Runs `tsc --build` across the TypeScript project references (server, client, shared). Never skip this step.
 - **Start Local Dev Environment:** `npm run dev`
   Deploys a test version of the app to the configured Reddit test subreddit using `devvit playtest`. The `devvit.json` also defines a `"dev"` script that runs the build in `--watch` mode.
 - **Deploy:** `npm run deploy`
@@ -31,16 +30,18 @@ Always ensure the build and type-checks succeed before pushing code or creating 
   Builds, deploys, and publishes the application to the Devvit app directory.
 
 ### Testing
-*Note: This project currently has no test files. If you add tests, use the native Node.js test runner (`node --test`), which is the project's preferred standard.*
+There is no `npm test` script. Tests use the native Node.js test runner and are colocated as `*.test.ts` next to the module they cover. They import `.ts` paths directly, so `--experimental-strip-types` is required.
 
-- **Run all tests (when tests exist):**
+- **Run all tests:**
   ```bash
-  node --test
+  node --test --experimental-strip-types src/server/*.test.ts
   ```
 - **Run a single test file:**
   ```bash
-  node --test path/to/specific.test.ts
+  node --test --experimental-strip-types src/server/markdown.test.ts
   ```
+
+Coverage is limited to the pure, dependency-free helpers (`cron-policy.test.ts`, `markdown.test.ts`). `server.ts` imports `context`/`redis`/`reddit`/`settings` from `@devvit/web/server`, which only resolve inside the Devvit runtime, so it cannot be imported from a test as written. Put new pure logic in its own module with its own test file. `TESTING.md` is the manual QA checklist for everything that cannot be unit-tested.
 
 ---
 
@@ -96,10 +97,12 @@ Always ensure the build and type-checks succeed before pushing code or creating 
 ### 6. Architecture & Platform Specifics
 - **Defensive Data Limits:** Devvit imposes limits on payload sizes and post bodies. Truncate large strings like descriptions before submitting posts via `reddit.submitPost`.
 - **Redis Key Management:** When adding new state or caching, namespace Redis keys logically. If state is per-feed or per-entity, include a unique ID in the key.
-  - Existing keys:
-    - `last_posted_guid:url:${sha1(feed.url).slice(0,12)}` — tracks the last posted episode GUID per feed using a stable URL hash.
-    - `pending_edit:${userId}` — stores the post ID during a body-edit flow (10-minute expiration).
-    - `last_global_check_date` — stores `YYYY-MM-DD` to gate daily/weekly polling frequency.
+  - Key highlights (see `CLAUDE.md` for the full annotated list):
+    - `last_posted_guid:url:${sha1(feed.url).slice(0,12)}` tracks the last posted episode GUID per feed using a stable URL hash. Legacy positional keys (`last_posted_guid:{index}`) are migrated on first read.
+    - `post_data:${postId}` holds the `EpisodeData` payload served to the WebView client. Written at post creation, `custom` post type only.
+    - `app_enabled_state` snapshots the `appEnabled` setting so the cron can detect a disabled to enabled transition and seed baselines instead of dumping a backlog.
+    - `sticky_highlights` is the JSON array of currently-highlighted post IDs.
+    - Spreaker and Audioboom API responses are cached under `spreaker_*` / `audioboom_*` keys with a ~50 minute TTL.
   - Do not rely solely on global keys if a feature might scale to multiple entities.
 - **External Dependencies:** Only introduce external dependencies if absolutely necessary. The Devvit runtime is lightweight. When fetching external data, make sure to set appropriate headers like `X-Fetch-Reason` to comply with platform policies.
 - **HTTP Domain Allowlisting:** All external RSS feed domains must be explicitly allowlisted in `devvit.json` under `permissions.http.domains`. Requests to unlisted domains will fail at runtime.
@@ -112,4 +115,6 @@ Always ensure the build and type-checks succeed before pushing code or creating 
 - **Do not break the build:** Run `npm run type-check` after *every* edit.
 - **Proactive Context:** Use `grep` and `glob` to verify variables, imports, and function signatures before making changes.
 - **Self-Correction:** If TypeScript throws an error, fix it immediately before proceeding to the next file.
-- **Respect legacy artifacts:** The `src/client/` directory and `public/splash.js` are legacy remnants of a removed webview feature. Do not reintroduce client-side webview code unless explicitly asked.
+- **Mind the post type branches:** Both the cron and the manual picker funnel through `createEpisodePost`, which branches on `postType` (`custom` / `self` / `link`). A change to post rendering usually needs to be considered for all three.
+- **Self and link Markdown must survive RTJSON conversion:** Reddit rejects list items nested more than 2 tiers. `buildSelfPostBody` runs its output through `clampListNesting` (`markdown.ts`). Do not emit deeper structure on those paths.
+- **Respect the 30s endpoint timeout:** Parallelize independent network calls with `Promise.all` / `allSettled`.

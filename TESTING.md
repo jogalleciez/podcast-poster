@@ -149,10 +149,13 @@ Run each with the **same** episode so output is comparable.
 - [ ] Spaces around `|` → trimmed
 - [ ] 3 feeds with one commented out → indices renumber over the filtered list
 
-### 3.2 URL normalization (`normalizeRssUrl`, `server.ts:115-119`)
+### 3.2 URL normalization (`normalizeRssUrl`, `src/server/feed-url.ts`)
+Unit-covered by `src/server/feed-url.test.ts`; these check the real fetch path.
+- [ ] `https://omnycontent.com/d/...` → fetches (rewritten to `traffic.omny.fm`)
 - [ ] `https://www.omnycontent.com/d/...` → fetches (rewritten to `traffic.omny.fm`), case-insensitive
+- [ ] `omnycontent.com/d/...` with **no scheme** → fetches (`https://` prepended, then rewritten)
 - [ ] `https://rss.buzzsprout.com/123.rss` → fetches (rewritten to `feeds.buzzsprout.com`)
-- [ ] `https://rss.buzzsprout.com` with **no path** → not normalized, fetch blocked (edge case)
+- [ ] `https://rss.buzzsprout.com` with **no path** → normalized to `https://feeds.buzzsprout.com` (host-only URLs are rewritten too)
 - [ ] `rss.libsyn.com/123/rss` works; `feeds.libsyn.com/...` and `{show}.libsyn.com/rss` fail (allowlist only, no alias)
 - [ ] `feeds.fastcast.ai/...` works
 - [ ] Non-allowlisted host → picker toast `Couldn't load episodes from that feed.`; cron logs `Error checking feed N` with no user-visible warning

@@ -16,7 +16,7 @@
     "node": ">=22.6.0"
   },
   "dependencies": {
-    "@devvit/web": "0.13.8",
+    "@devvit/web": "0.14.0",
     "fast-xml-parser": "^5.4.1",
     "node-html-markdown": "^2.0.0",
     "react": "^19.2.5",
@@ -28,7 +28,7 @@
     "@types/node": "22.12.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
-    "devvit": "^0.13.8",
+    "devvit": "^0.14.0",
     "esbuild": "0.27.2",
     "typescript": "5.8.3"
   }

@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**podcast-poster** is a Reddit Devvit app (`@devvit/web@0.13.8`) that posts episodes from RSS podcast feeds to a subreddit. By default posts are **custom WebView posts** rendered by a React client, but the `postType` setting can switch them to self or link posts. Moderators configure one or more feeds via app settings; a cron job (every 15 minutes) polls feeds and creates posts. Moderators can also pick a feed/episode manually via a subreddit menu item.
+**podcast-poster** is a Reddit Devvit app (`@devvit/web@0.14.0`) that posts episodes from RSS podcast feeds to a subreddit. By default posts are **custom WebView posts** rendered by a React client, but the `postType` setting can switch them to self or link posts. Moderators configure one or more feeds via app settings; a cron job (every 15 minutes) polls feeds and creates posts. Moderators can also pick a feed/episode manually via a subreddit menu item.
 
-Note: the app migrated away from plain self-posts as the only format. AGENTS.md still describes the old server-only/self-post architecture (and claims `src/client/` is empty) — prefer this file when they disagree.
+Note: the app migrated away from plain self-posts as the only format. If any doc still describes a server-only/self-post-only architecture, prefer this file.
 
 ## Quick Start
 
@@ -34,12 +34,12 @@ Single file:
 node --test --experimental-strip-types src/server/markdown.test.ts
 ```
 
-Current coverage is only `cron-policy.test.ts` and `markdown.test.ts` — the pure, dependency-free helpers. `server.ts` imports `context`/`redis`/`reddit`/`settings` from `@devvit/web/server`, which only resolve inside the Devvit runtime, so importing it from a test is not viable as written; put new pure logic in its own module with a test file, the way `cron-policy.ts` and `markdown.ts` do. `TESTING.md` is the manual QA checklist for everything that can't be unit tested.
+Current coverage is only `cron-policy.test.ts`, `markdown.test.ts`, and `feed-url.test.ts` — the pure, dependency-free helpers. `server.ts` imports `context`/`redis`/`reddit`/`settings` from `@devvit/web/server`, which only resolve inside the Devvit runtime, so importing it from a test is not viable as written; put new pure logic in its own module with a test file, the way `cron-policy.ts` and `markdown.ts` do. `TESTING.md` is the manual QA checklist for everything that can't be unit tested.
 
 ## Architecture
 
 ### Three source modules
-- **`src/server/`** — Node.js backend. One ~1550-line module, `src/server/server.ts`, holds the router plus every handler, feed adapter, and parser. Entry `src/server/index.ts`. Two pure helper modules are split out so they can be unit-tested without the Devvit runtime: `cron-policy.ts` (`decideCronAction`) and `markdown.ts` (`clampListNesting`). Output: `dist/server/index.js` (CommonJS).
+- **`src/server/`** — Node.js backend. One ~1550-line module, `src/server/server.ts`, holds the router plus every handler, feed adapter, and parser. Entry `src/server/index.ts`. Three pure helper modules are split out so they can be unit-tested without the Devvit runtime: `cron-policy.ts` (`decideCronAction`), `markdown.ts` (`clampListNesting`), and `feed-url.ts` (`normalizeRssUrl`). Output: `dist/server/index.js` (CommonJS).
 - **`src/client/`** — React 19 WebView client rendered inside the Reddit post. `index.tsx` mounts `App.tsx`, which fetches episode data from `/api/post-data` and renders it with `react-markdown` + `remark-gfm`. Static files (`index.html`, `styles.css`, `fonts/`) are copied into `dist/client/` by a custom esbuild plugin. Output: ESM browser bundle.
 - **`src/shared/`** — `api.ts` holds the `ApiEndpoint` constant map and all shared types (`EpisodeData`, `DisplaySettings`, `PostDataResponse`, `ClientErrorReport`, etc.) used by both server and client.
 
@@ -122,15 +122,18 @@ Both adapters cache their API responses in Redis (TTL ~50 min) and expose the sa
 ## Constraints
 
 - **Devvit endpoint timeout: 30s.** Parallelize all independent network calls.
-- **HTTP domain allowlist.** Every RSS host must be in `devvit.json` → `permissions.http.domains` (capped at 25 entries by Devvit — see commit `c4087b7`; currently 20 are used). Unlisted hosts fail at fetch time with no user-visible warning on the cron path. Where a host has aliases, prefer normalizing the URL in `normalizeRssUrl` over spending an allowlist slot.
+- **HTTP domain allowlist.** Every RSS host must be in `devvit.json` → `permissions.http.domains` (capped at 25 entries by Devvit — see commit `c4087b7`; currently 23 are used). Unlisted hosts fail at fetch time with no user-visible warning on the cron path. Where a host has aliases, prefer normalizing the URL in `normalizeRssUrl` over spending an allowlist slot.
 - **Redis-only state.** No database.
-- **Node 22.6.0+** required (`tools/build.ts` and the test runner use `--experimental-strip-types`).
+- **Node 22.6.0+** required (`--experimental-strip-types` landed in 22.6.0, and both `tools/build.ts` and the test runner rely on it). Devvit 0.14.0 itself only declares `node >=20`, so 22.6.0 is this project's floor, not the platform's. `.nvmrc` pins `22.6.0`.
 - **No `any` without narrowing to `unknown`.** Prefer `type` over `interface`. Explicit return types on exported functions and route handlers.
 - **Reddit stickies: 2 slots max**, despite `post.sticky()`'s type accepting 1–4.
 - **Self/link post Markdown must survive RTJSON conversion** — see the clamping note above before adding anything that emits deep structure.
 
 ## Related docs
 - `TESTING.md` — manual QA checklist for a test subreddit, ordered by risk, plus a list of confirmed-but-surprising behaviors (§6). The authority on what has and hasn't been verified on a real sub.
-- `AGENTS.md` — code style rules (still accurate) and a command/architecture section that is stale (claims no client, no tests, v0.12.20); treat the latter with skepticism.
-- `README.md` — user-facing feature overview, settings reference, supported hosts, changelog.
+- `AGENTS.md`: code style rules (naming, imports, formatting, error handling) plus a condensed commands/architecture section. Refreshed for 0.14.0; this file remains the more detailed architecture reference.
+- `README.md`: moderator-facing setup guide. Deliberately non-technical, written for a podcaster installing the app: quick start, what each post type looks like, how to add a feed, the settings table, and a "Good to know" section covering the seeding/backlog behavior and the 2-sticky limit in plain language. Implementation detail does not belong here.
+- `TECHNICAL.md`: the implementation-level counterpart to `README.md`, holding the technical framing the README used to carry before it was rewritten for moderators. Covers the feature list, cron vs manual posting flows, post-format behavior, the settings reference with types and defaults, the supported-host table, tech stack, and known limitations. Sits between `README.md` and this file in depth: more precise than the README, less internal than the architecture notes here. It documents *what the app does and why*; this file documents *how the code is laid out*.
 - `devvit.json` — manifest: menu items, forms, scheduler, settings schema, domain allowlist.
+
+**Doc drift hazard:** the supported-host table is duplicated in both `README.md` and `TECHNICAL.md`, and the real source of truth is `permissions.http.domains` in `devvit.json`. Adding a host means touching four places: the allowlist, both tables, and the count in the HTTP allowlist constraint above. Note the tables list fewer rows than the allowlist by design, since some providers (Simplecast, Spreaker, Audioboom) spend two slots on an RSS host plus a JSON API host, and a slot may be reserved for a normalization target that never appears in a table.

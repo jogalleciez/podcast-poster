@@ -75,7 +75,10 @@
         "feeds.megaphone.fm",
         "api.audioboom.com",
         "rss.libsyn.com",
-        "feeds.fastcast.ai"
+        "feeds.fastcast.ai",
+        "feeds.feedburner.com",
+        "podcast.darknetdiaries.com",
+        "feeds.soundcloud.com"
       ]
     }
   },
