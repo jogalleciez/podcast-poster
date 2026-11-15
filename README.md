@@ -71,7 +71,7 @@ Only the first part is required.
 ```
 https://rss.art19.com/get-played | Get Played
 https://feeds.transistor.fm/my-podcast | | https://my-podcast.com/listen
-https://feeds.buzzsprout.com/123456.xml
+https://rss.buzzsprout.com/123456.xml
 ```
 
 The first one is renamed to "Get Played". The second keeps its own name but sends listeners to your site. The third uses the defaults for both.
@@ -94,24 +94,24 @@ Pod Poster works with these hosts out of the box:
 | **Audioboom** | `api.audioboom.com` ² |
 | **Ausha** | `feed.ausha.co` |
 | **BBC Podcasts** | `podcasts.files.bbci.co.uk` |
-| **Buzzsprout** | `feeds.buzzsprout.com` ⁴ |
+| **Buzzsprout** | `rss.buzzsprout.com` ⁴ |
 | **Captivate** | `feeds.captivate.fm` |
 | **Darknet Diaries** | `podcast.darknetdiaries.com` |
-| **Fastcast.ai** | `feeds.fastcast.ai` |
-| **FeedBurner** | `feeds.feedburner.com` |
-| **HubHopper** | `rss.hubhopper.com` |
-| **Libsyn** | `rss.libsyn.com` |
+| **HubHopper** | `feeds.hubhopper.com` |
+| **Libsyn** | `rss.libsyn.com`, `feeds.libsyn.com` |
 | **Megaphone** | `feeds.megaphone.fm` |
 | **Omny Studio** | `traffic.omny.fm` ³ |
 | **Podbean** | `feed.podbean.com` |
 | **RedCircle** | `feeds.redcircle.com` |
 | **RSS.com** | `media.rss.com` |
-| **Simplecast** | `feeds.simplecast.com`, `api.simplecast.com` |
+| **Simplecast** | `feeds.simplecast.com` |
 | **SoundCloud** | `feeds.soundcloud.com` |
 | **Spreaker** | `api.spreaker.com` ¹ |
 | **Transistor** | `feeds.transistor.fm` |
 
 To check whether yours is covered, look at your feed URL and find the part right after `https://`. If it appears in the table above, you are good to go.
+
+If your feed address starts with `rss.pdrl.fm/` (a Podtrac tracking link), skip past that part and the short code after it, and check the address that follows instead. The app handles Podtrac links for you.
 
 > ¹ For Spreaker, paste your `https://www.spreaker.com/show/{id}/episodes/feed` URL exactly as it appears. The app handles the rest.
 >
@@ -119,7 +119,7 @@ To check whether yours is covered, look at your feed URL and find the part right
 >
 > ³ Omny Studio shows `omnycontent.com` addresses in its dashboard (sometimes with a `www.` in front). Any of those, or a `traffic.omny.fm` address, will work.
 >
-> ⁴ Buzzsprout feeds work whether the address starts with `feeds.buzzsprout.com` or `rss.buzzsprout.com`.
+> ⁴ Buzzsprout feeds work whether the address starts with `rss.buzzsprout.com` or `feeds.buzzsprout.com`.
 
 Do not see your host? Open an [issue](https://github.com/jogalleciez/podcast-poster/issues/new) or [send the developer a message](https://www.reddit.com/message/compose/?to=/u/jogalleciez).
 

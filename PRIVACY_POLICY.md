@@ -67,11 +67,11 @@ Both values are overwritten each time a new episode is posted and are never shar
 
 ## Third-Party Services
 
-The App makes outbound HTTP requests only to fetch RSS feed XML from podcast hosting platforms. The domains the App is permitted to contact are:
+The App makes outbound HTTP requests only to fetch podcast episode data from podcast hosting platforms: RSS feed XML, plus the Spreaker and Audioboom JSON APIs for shows hosted there. The domains the App is permitted to contact are:
 
 - `rss.art19.com`
 - `traffic.omny.fm`
-- `feeds.buzzsprout.com`
+- `rss.buzzsprout.com`
 - `feeds.redcircle.com`
 - `feeds.transistor.fm`
 - `feeds.captivate.fm`
@@ -79,7 +79,17 @@ The App makes outbound HTTP requests only to fetch RSS feed XML from podcast hos
 - `media.rss.com`
 - `feeds.acast.com`
 - `feed.ausha.co`
-- `rss.hubhopper.com`
+- `feeds.hubhopper.com`
+- `feeds.simplecast.com`
+- `api.spreaker.com`
+- `cdn.atp.fm`
+- `podcasts.files.bbci.co.uk`
+- `feeds.megaphone.fm`
+- `api.audioboom.com`
+- `rss.libsyn.com`
+- `feeds.libsyn.com`
+- `podcast.darknetdiaries.com`
+- `feeds.soundcloud.com`
 
 **No Reddit user data is sent to any of these services.** Requests include only standard HTTP headers and an explanatory `X-Fetch-Reason` header identifying the App's purpose.
 

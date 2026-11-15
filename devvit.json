@@ -58,7 +58,7 @@
       "domains": [
         "rss.art19.com",
         "traffic.omny.fm",
-        "feeds.buzzsprout.com",
+        "rss.buzzsprout.com",
         "feeds.redcircle.com",
         "feeds.transistor.fm",
         "feeds.captivate.fm",
@@ -66,17 +66,15 @@
         "media.rss.com",
         "feeds.acast.com",
         "feed.ausha.co",
-        "rss.hubhopper.com",
+        "feeds.hubhopper.com",
         "feeds.simplecast.com",
-        "api.simplecast.com",
         "api.spreaker.com",
         "cdn.atp.fm",
         "podcasts.files.bbci.co.uk",
         "feeds.megaphone.fm",
         "api.audioboom.com",
         "rss.libsyn.com",
-        "feeds.fastcast.ai",
-        "feeds.feedburner.com",
+        "feeds.libsyn.com",
         "podcast.darknetdiaries.com",
         "feeds.soundcloud.com"
       ]

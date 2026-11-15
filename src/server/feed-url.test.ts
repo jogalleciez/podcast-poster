@@ -18,22 +18,65 @@ test("the www Omny alias still normalizes", () => {
   );
 });
 
-test("host matching is case-insensitive and the scheme is preserved", () => {
+test("host matching is case-insensitive and the query is preserved", () => {
   assert.equal(
-    normalizeRssUrl("HTTP://WWW.OmnyContent.com/d/playlist/abc/podcast.rss?x=1"),
-    "HTTP://traffic.omny.fm/d/playlist/abc/podcast.rss?x=1",
+    normalizeRssUrl("HTTPS://WWW.OmnyContent.com/d/playlist/abc/podcast.rss?x=1"),
+    "HTTPS://traffic.omny.fm/d/playlist/abc/podcast.rss?x=1",
   );
 });
 
-test("the Buzzsprout alias normalizes with and without www", () => {
+test("http is upgraded to https, since Devvit only fetches https", () => {
+  assert.equal(
+    normalizeRssUrl("http://feeds.megaphone.fm/ADL1234567890"),
+    "https://feeds.megaphone.fm/ADL1234567890",
+  );
+  assert.equal(
+    normalizeRssUrl("HTTP://WWW.OmnyContent.com/d/playlist/abc/podcast.rss?x=1"),
+    "https://traffic.omny.fm/d/playlist/abc/podcast.rss?x=1",
+  );
+});
+
+test("the Buzzsprout alias normalizes to rss.buzzsprout.com, with and without www", () => {
+  // feeds.buzzsprout.com now 301s to rss.buzzsprout.com, so rss. is canonical.
+  assert.equal(
+    normalizeRssUrl("https://feeds.buzzsprout.com/123456.rss"),
+    "https://rss.buzzsprout.com/123456.rss",
+  );
+  assert.equal(
+    normalizeRssUrl("https://www.feeds.buzzsprout.com/123456.rss"),
+    "https://rss.buzzsprout.com/123456.rss",
+  );
   assert.equal(
     normalizeRssUrl("https://rss.buzzsprout.com/123456.rss"),
-    "https://feeds.buzzsprout.com/123456.rss",
+    "https://rss.buzzsprout.com/123456.rss",
+  );
+});
+
+test("a Podtrac rss.pdrl.fm wrapper is unwrapped to the real feed", () => {
+  assert.equal(
+    normalizeRssUrl("https://rss.pdrl.fm/3d28ed/feeds.megaphone.fm/ADL1234567890"),
+    "https://feeds.megaphone.fm/ADL1234567890",
   );
   assert.equal(
-    normalizeRssUrl("https://www.rss.buzzsprout.com/123456.rss"),
-    "https://feeds.buzzsprout.com/123456.rss",
+    normalizeRssUrl("http://RSS.PDRL.FM/abc123/feeds.simplecast.com/54nAGcIl?x=1"),
+    "https://feeds.simplecast.com/54nAGcIl?x=1",
   );
+});
+
+test("an unwrapped Podtrac feed still gets its host alias rewritten", () => {
+  assert.equal(
+    normalizeRssUrl(`https://rss.pdrl.fm/3d28ed/www.omnycontent.com${OMNY_PATH}`),
+    `https://traffic.omny.fm${OMNY_PATH}`,
+  );
+  assert.equal(
+    normalizeRssUrl("rss.pdrl.fm/3d28ed/https://feeds.buzzsprout.com/1.rss"),
+    "https://rss.buzzsprout.com/1.rss",
+  );
+});
+
+test("a Podtrac URL with nothing after the tracking id is left alone", () => {
+  assert.equal(normalizeRssUrl("https://rss.pdrl.fm/3d28ed"), "https://rss.pdrl.fm/3d28ed");
+  assert.equal(normalizeRssUrl("https://rss.pdrl.fm/3d28ed/"), "https://rss.pdrl.fm/3d28ed/");
 });
 
 test("a scheme-less paste gains https and still normalizes", () => {
