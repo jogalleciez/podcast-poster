@@ -98,7 +98,7 @@ Lines beginning with `#` are ignored, so they can be used for comments or to tem
 ```
 https://rss.art19.com/get-played | Get Played
 https://feeds.transistor.fm/my-podcast | | https://my-podcast.com/listen
-https://feeds.buzzsprout.com/123456.xml
+https://rss.buzzsprout.com/123456.xml
 ```
 
 In the first example, the feed will be titled "Get Played". In the second, the podcast name defaults to the RSS title, but the listen link points to your site. The third uses both defaults.
@@ -117,19 +117,17 @@ The following podcast hosting providers are supported out of the box:
 | **Audioboom** | `api.audioboom.com` ² |
 | **Ausha** | `feed.ausha.co` |
 | **BBC Podcasts** | `podcasts.files.bbci.co.uk` |
-| **Buzzsprout** | `feeds.buzzsprout.com` ⁴ |
+| **Buzzsprout** | `rss.buzzsprout.com` ⁴ |
 | **Captivate** | `feeds.captivate.fm` |
 | **Darknet Diaries** | `podcast.darknetdiaries.com` |
-| **Fastcast.ai** | `feeds.fastcast.ai` |
-| **FeedBurner** | `feeds.feedburner.com` |
-| **HubHopper** | `rss.hubhopper.com` |
-| **Libsyn** | `rss.libsyn.com` |
+| **HubHopper** | `feeds.hubhopper.com` |
+| **Libsyn** | `rss.libsyn.com`, `feeds.libsyn.com` |
 | **Megaphone** | `feeds.megaphone.fm` |
 | **Omny Studio** | `traffic.omny.fm` ³ |
 | **Podbean** | `feed.podbean.com` |
 | **RedCircle** | `feeds.redcircle.com` |
 | **RSS.com** | `media.rss.com` |
-| **Simplecast** | `feeds.simplecast.com`, `api.simplecast.com` |
+| **Simplecast** | `feeds.simplecast.com` |
 | **SoundCloud** | `feeds.soundcloud.com` |
 | **Spreaker** | `api.spreaker.com` ¹ |
 | **Transistor** | `feeds.transistor.fm` |
@@ -140,9 +138,11 @@ The following podcast hosting providers are supported out of the box:
 >
 > ³ Omny Studio shows `omnycontent.com` URLs in their dashboard, with or without a `www.` prefix. Both forms are automatically normalized to `traffic.omny.fm` by the app, so any of these URLs works.
 >
-> ⁴ Buzzsprout RSS feeds are also accessible at `rss.buzzsprout.com`. These are automatically normalized to `feeds.buzzsprout.com` by the app, so either URL works. A pasted URL with no `https://` at all is also accepted.
+> ⁴ Buzzsprout's older `feeds.buzzsprout.com` addresses now `301` to `rss.buzzsprout.com`, so the app normalizes them to `rss.buzzsprout.com` before fetching rather than relying on Devvit to follow a redirect to that host. Either URL works.
 
-Adding a host requires a new entry in `devvit.json` → `permissions.http.domains`, which Devvit caps at 25. Where a host has aliases, prefer normalizing the URL in `normalizeRssUrl` over spending an allowlist slot.
+`normalizeRssUrl` (`src/server/feed-url.ts`) also accepts a pasted URL with no scheme, upgrades `http://` to `https://` (Devvit fetch is https-only), and unwraps Podtrac tracking URLs of the form `rss.pdrl.fm/{id}/{feed URL}`, which `302` to the wrapped feed. The wrapped host must itself be in the table above.
+
+Adding a host requires a new entry in `devvit.json` → `permissions.http.domains`, which Devvit caps at 25, and each new domain goes through Devvit's manual review on the next upload. Where a host has aliases, prefer normalizing the URL in `normalizeRssUrl` over spending an allowlist slot.
 
 Need a different host? Open an [issue](https://github.com/jogalleciez/podcast-poster/issues/new) or [contact the developer](https://www.reddit.com/message/compose/?to=/u/jogalleciez).
 

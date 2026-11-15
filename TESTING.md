@@ -154,10 +154,13 @@ Unit-covered by `src/server/feed-url.test.ts`; these check the real fetch path.
 - [ ] `https://omnycontent.com/d/...` → fetches (rewritten to `traffic.omny.fm`)
 - [ ] `https://www.omnycontent.com/d/...` → fetches (rewritten to `traffic.omny.fm`), case-insensitive
 - [ ] `omnycontent.com/d/...` with **no scheme** → fetches (`https://` prepended, then rewritten)
-- [ ] `https://rss.buzzsprout.com/123.rss` → fetches (rewritten to `feeds.buzzsprout.com`)
-- [ ] `https://rss.buzzsprout.com` with **no path** → normalized to `https://feeds.buzzsprout.com` (host-only URLs are rewritten too)
-- [ ] `rss.libsyn.com/123/rss` works; `feeds.libsyn.com/...` and `{show}.libsyn.com/rss` fail (allowlist only, no alias)
-- [ ] `feeds.fastcast.ai/...` works
+- [ ] `https://feeds.buzzsprout.com/123.rss` → fetches (rewritten to `rss.buzzsprout.com`)
+- [ ] `https://rss.buzzsprout.com/123.rss` → fetches unchanged
+- [ ] `rss.libsyn.com/shows/{id}/destinations/{id}.xml`, `feeds.libsyn.com/{id}` and `feeds.libsyn.com/{id}/rss` (redirects to `rss.libsyn.com`) all work; `{show}.libsyn.com/rss` fails (not allowlisted, no alias)
+- [ ] `feeds.hubhopper.com/{id}.rss` works
+- [ ] `http://...` on an allowlisted host → fetches (upgraded to `https://`)
+- [ ] `https://rss.pdrl.fm/{id}/feeds.megaphone.fm/...` → fetches (Podtrac wrapper stripped)
+- [ ] `https://rss.pdrl.fm/{id}/www.omnycontent.com/d/...` → fetches (unwrapped, then rewritten to `traffic.omny.fm`)
 - [ ] Non-allowlisted host → picker toast `Couldn't load episodes from that feed.`; cron logs `Error checking feed N` with no user-visible warning
 
 ### 3.3 Manual posting flow (`server.ts:908-960`, `1334-1436`)
