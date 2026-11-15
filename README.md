@@ -177,7 +177,7 @@ Questions, bug reports, and host requests are welcome:
 
 | Component | Technology |
 |---|---|
-| Platform | [Devvit Web](https://developers.reddit.com/docs/capabilities/devvit-web/devvit_web_overview) v0.14.0 |
+| Platform | [Devvit Web](https://developers.reddit.com/docs/capabilities/devvit-web/devvit_web_overview) v0.15.3 |
 | Language | TypeScript 5.x / Node.js ≥ 22.6 |
 | Frontend | React 19 + `react-markdown` (episode card UI) |
 | RSS Parsing | [`fast-xml-parser`](https://github.com/NaturalIntelligence/fast-xml-parser) |

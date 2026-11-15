@@ -4,7 +4,7 @@ This document provides operational guidelines, commands, and code style rules fo
 
 ## Project Overview
 
-This is a Reddit Devvit application (`@devvit/web@0.14.0`) built with TypeScript and Node.js (v22.6.0+). The app automatically posts the latest episodes from one or more RSS podcast feeds to a subreddit. By default it creates **custom WebView posts** rendered by a React client; the `postType` setting can switch them to self or link posts instead. Moderators configure feeds via app settings; a cron job polls feeds every 15 minutes and creates posts, and a subreddit menu item allows posting a chosen episode manually.
+This is a Reddit Devvit application (`@devvit/web@0.15.3`) built with TypeScript and Node.js (v22.6.0+). The app automatically posts the latest episodes from one or more RSS podcast feeds to a subreddit. By default it creates **custom WebView posts** rendered by a React client; the `postType` setting can switch them to self or link posts instead. Moderators configure feeds via app settings; a cron job polls feeds every 15 minutes and creates posts, and a subreddit menu item allows posting a chosen episode manually.
 
 ### Directory Structure
 - `src/server/`: Backend execution context (HTTP request routing, RSS fetching, Reddit post creation, Redis state management). `server.ts` holds the router and every handler; `cron-policy.ts` and `markdown.ts` are pure helpers split out so they can be unit-tested outside the Devvit runtime.

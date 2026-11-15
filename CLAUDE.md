@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**podcast-poster** is a Reddit Devvit app (`@devvit/web@0.14.0`) that posts episodes from RSS podcast feeds to a subreddit. By default posts are **custom WebView posts** rendered by a React client, but the `postType` setting can switch them to self or link posts. Moderators configure one or more feeds via app settings; a cron job (every 15 minutes) polls feeds and creates posts. Moderators can also pick a feed/episode manually via a subreddit menu item.
+**podcast-poster** is a Reddit Devvit app (`@devvit/web@0.15.3`) that posts episodes from RSS podcast feeds to a subreddit. By default posts are **custom WebView posts** rendered by a React client, but the `postType` setting can switch them to self or link posts. Moderators configure one or more feeds via app settings; a cron job (every 15 minutes) polls feeds and creates posts. Moderators can also pick a feed/episode manually via a subreddit menu item.
 
 Note: the app migrated away from plain self-posts as the only format. If any doc still describes a server-only/self-post-only architecture, prefer this file.
 
@@ -124,7 +124,7 @@ Both adapters cache their API responses in Redis (TTL ~50 min) and expose the sa
 - **Devvit endpoint timeout: 30s.** Parallelize all independent network calls.
 - **HTTP domain allowlist.** Every RSS host must be in `devvit.json` → `permissions.http.domains` (capped at 25 entries by Devvit, see commit `c4087b7`; currently 21 are used). Unlisted hosts fail at fetch time with no user-visible warning on the cron path, and every new domain goes through Devvit's manual review on the next upload. Where a host has aliases, prefer normalizing the URL in `normalizeRssUrl` over spending an allowlist slot. Normalize **toward** the host that actually serves the feed: if the allowlisted host only redirects to an unlisted one, the fetch may fail (this is why Buzzsprout's canonical host is `rss.buzzsprout.com`, since `feeds.buzzsprout.com` now 301s there). `normalizeRssUrl` also upgrades `http://` to `https://` (Devvit fetch is https-only) and unwraps Podtrac `rss.pdrl.fm/{id}/{feed URL}` wrappers.
 - **Redis-only state.** No database.
-- **Node 22.6.0+** required (`--experimental-strip-types` landed in 22.6.0, and both `tools/build.ts` and the test runner rely on it). Devvit 0.14.0 itself only declares `node >=20`, so 22.6.0 is this project's floor, not the platform's. `.nvmrc` pins `22.6.0`.
+- **Node 22.6.0+** required (`--experimental-strip-types` landed in 22.6.0, and both `tools/build.ts` and the test runner rely on it). Devvit 0.15.3 itself only declares `node >=20`, so 22.6.0 is this project's floor, not the platform's. `.nvmrc` pins `22.6.0`.
 - **No `any` without narrowing to `unknown`.** Prefer `type` over `interface`. Explicit return types on exported functions and route handlers.
 - **Reddit stickies: 2 slots max**, despite `post.sticky()`'s type accepting 1–4.
 - **Self/link post Markdown must survive RTJSON conversion** — see the clamping note above before adding anything that emits deep structure.
