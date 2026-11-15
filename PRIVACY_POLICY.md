@@ -45,7 +45,7 @@ Each report can contain:
 - for errors, the error message and technical trace, and
 - the time the report was received.
 
-Reports contain no username, user ID, or IP address, and cannot be linked to a specific Reddit account. Only the 50 most recent reports are kept. Older reports are deleted automatically as new ones arrive. Reports are not shared with any third party.
+Reports contain no username, user ID, or IP address, and cannot be linked to a specific Reddit account. Only the 50 most recent reports are kept. Older reports are deleted automatically as new ones arrive. Reports can be read only by moderators of the subreddit where the App is installed, for troubleshooting, and are not shared with any third party.
 
 ### Browser storage
 

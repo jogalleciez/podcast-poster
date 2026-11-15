@@ -64,7 +64,7 @@ Routed by **exact URL match** in `server.ts` (a `switch` over `ApiEndpoint` with
 | `POST /internal/on-app-install` | Install trigger |
 | `GET  /api/post-data` | Called by the React client to load the episode payload for the current post; 404s for self/link posts |
 | `POST /api/log-client-error` | Client error reporter (`reportClientError` in `App.tsx`) |
-| `GET  /api/client-errors` | Read recent client errors |
+| `GET  /api/client-errors` | Read recent client errors. **Moderator-only** (`isCurrentUserModerator`, fails closed with 403), because `/api/*` is reachable from any viewer's client and the log holds user agents |
 
 ### Redis keys
 - `last_posted_guid:url:{sha1(feed.url).slice(0,12)}` — per-feed last-posted GUID, keyed by a stable URL hash so reordering feeds doesn't lose history. Legacy positional keys (`last_posted_guid:{index}`) are migrated on first read.

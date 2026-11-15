@@ -307,7 +307,8 @@ Unit-covered by `src/server/feed-url.test.ts`; these check the real fetch path.
 - [ ] `/api/post-data?x=1` (any query string) → 404, since routing is exact-match (`server.ts:45`)
 - [ ] Unknown endpoint → `404 {"error":"not found"}`
 - [ ] Force a server throw → confirm the **stack trace** in the 500 JSON never surfaces in a mod- or user-visible UI (`server.ts:25-31`)
-- [ ] Client error reporting: trigger a JS error → appears in `GET /api/client-errors`, capped at 50, newest first
+- [ ] Client error reporting: trigger a JS error → appears in `GET /api/client-errors` (as a moderator), capped at 50, newest first
+- [ ] `GET /api/client-errors` as a non-moderator (or logged out) → `403 {"error":"forbidden"}`, no log entries returned
 - [ ] Send malformed JSON to `/api/log-client-error` → a `{ts, parseError}` entry is stored, response is still `{ok:true}`
 - [ ] **Noise check:** expand/collapse a post ~10 times → confirm every mode change is logged as a client "error" and evicts real errors from the 50-entry ring (see §6.7)
 
