@@ -1,0 +1,56 @@
+# Uploads a new private version of the app to Devvit (`devvit upload`).
+# Publishing (`devvit publish`) stays manual: it can stop at interactive
+# prompts (source-upload consent, updated developer terms) that would hang CI.
+#
+# Auth: the Devvit CLI reads DEVVIT_AUTH_TOKEN in place of ~/.devvit/token.
+# This is undocumented CLI behavior (see AuthTokenStore.readFSToken in
+# @devvit/cli). Set the secret from a logged-in machine with:
+#   gh secret set DEVVIT_AUTH_TOKEN < ~/.devvit/token
+# If uploads start failing on auth, run `devvit login` locally and set it again.
+
+name: Upload to Devvit
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: devvit-upload
+  cancel-in-progress: false
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for Devvit token
+        env:
+          DEVVIT_AUTH_TOKEN: ${{ secrets.DEVVIT_AUTH_TOKEN }}
+        run: |
+          if [ -z "$DEVVIT_AUTH_TOKEN" ]; then
+            echo "::error::DEVVIT_AUTH_TOKEN secret is not set. Run: gh secret set DEVVIT_AUTH_TOKEN < ~/.devvit/token"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - name: Type-check
+        run: npm run type-check
+
+      - name: Unit tests
+        run: node --test --experimental-strip-types src/server/*.test.ts
+
+      - name: Build and upload
+        run: npm run deploy
+        env:
+          DEVVIT_AUTH_TOKEN: ${{ secrets.DEVVIT_AUTH_TOKEN }}

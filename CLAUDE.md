@@ -20,6 +20,12 @@ npm run launch       # build + deploy + devvit publish
 
 Always run `npm run type-check` after edits.
 
+### CI upload
+
+`.github/workflows/devvit-upload.yml` runs type-check, unit tests, and `npm run deploy` (build + `devvit upload`) on every push to `main` and on manual dispatch. It does **not** publish: `devvit publish` can stop at interactive prompts (source-upload consent, updated developer terms) that would hang a CI job, so publishing stays manual.
+
+Auth relies on undocumented CLI behavior: `@devvit/cli` reads a `DEVVIT_AUTH_TOKEN` env var in place of `~/.devvit/token` (`AuthTokenStore.readFSToken`). The repo secret is a copy of that file, set with `gh secret set DEVVIT_AUTH_TOKEN < ~/.devvit/token`. Each run refreshes the access token from the stored refresh token without saving it, so if auth starts failing, `devvit login` locally and reset the secret. Recheck the env var after CLI upgrades. Upload bumps the patch version from Reddit's server-side latest, so CI never writes a version back to the repo.
+
 ### Tests
 
 There is no `npm test` script. Tests are plain `node:test` files colocated as `*.test.ts` next to the module they cover. They import `.ts` paths directly, which Node 24 handles by default; the commands keep `--experimental-strip-types` for consistency with the build script:
@@ -128,6 +134,15 @@ Both adapters cache their API responses in Redis (TTL ~50 min) and expose the sa
 - **No `any` without narrowing to `unknown`.** Prefer `type` over `interface`. Explicit return types on exported functions and route handlers.
 - **Reddit stickies: 2 slots max**, despite `post.sticky()`'s type accepting 1–4.
 - **Self/link post Markdown must survive RTJSON conversion** — see the clamping note above before adding anything that emits deep structure.
+
+## Devvit documentation
+
+Go to GitHub first for Devvit docs: read the **`reddit/devvit-docs`** repo with `gh`. developers.reddit.com blocks agent access (WebFetch and the built-in browser are both refused), and the `devvit` MCP search index returns partial chunks (it has missed entire changelog releases), so treat it as a fallback.
+
+- `versioned_docs/version-X.Y/` matches a released version; pick the one matching `@devvit/web` in `package.json`. `docs/` tracks the repo's main branch and may include unreleased changes.
+- File paths mirror the site URLs: `developers.reddit.com/docs/changelog` is `docs/changelog.md`.
+- Read a file: `gh api repos/reddit/devvit-docs/contents/docs/changelog.md -H "Accept: application/vnd.github.raw"`
+- Search: `gh search code --repo reddit/devvit-docs "getModerators"`
 
 ## Related docs
 - `TESTING.md` — manual QA checklist for a test subreddit, ordered by risk, plus a list of confirmed-but-surprising behaviors (§6). The authority on what has and hasn't been verified on a real sub.
