@@ -128,6 +128,7 @@ The App's server makes outbound requests only to fetch podcast episode data from
 - `feeds.libsyn.com`
 - `podcast.darknetdiaries.com`
 - `feeds.soundcloud.com`
+- `itunes.apple.com` (Apple's public podcast directory)
 
 **No Reddit user data is sent to any of these services.** These requests come from Reddit's servers, not from viewers' devices, and include only standard HTTP headers and an `X-Fetch-Reason` header explaining the App's purpose.
 
